@@ -1,0 +1,40 @@
+name: mobile_pos
+description: Mobile POS Aibipi
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.4.0
+  riverpod: ^2.5.1
+  flutter_riverpod: ^2.5.1
+  intl: ^0.19.0
+  print_bluetooth_thermal: ^1.1.9
+  shared_preferences: ^2.5.4
+  esc_pos_utils_plus: ^2.0.4
+  permission_handler: ^12.0.1
+  flutter_launcher_icons: ^0.14.4
+  font_awesome_flutter: ^11.0.0
+  uuid: ^4.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
