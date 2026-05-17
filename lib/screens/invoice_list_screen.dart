@@ -19,14 +19,13 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   int    _userID       = 0;
   int    _organisasiID = 0;
   // Store data — dipakai untuk print & WA & email
-  // Untuk multi-store, diambil dari store aktif (shift)
   int    _activeStoreID      = 0;
   String _activeStoreName    = '';
   String _activeStoreAddress = '';
   String _activeStoreNpwp    = '';
   String _activeInvoiceNote  = '';
   int    _waEnabled          = 0;
-  // Apakah user punya akses > 1 store (untuk tampilkan kolom store di list)
+  bool   _isFnB        = false;  // true jika jasa_perusahaan == 3
   bool   _isMultiStore = false;
   bool   _isLoading    = true;
   DateTime _dateFrom = DateTime.now().subtract(const Duration(days: 9));
@@ -57,18 +56,17 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           List<Map<String, dynamic>>.from(storeRes.data['data']);
       _isMultiStore = stores.length > 1;
 
-      // Ambil organisasiID dari store pertama (semua store milik org yang sama)
+      // Ambil organisasiID + flag FnB dari store pertama
       _activeStoreID = int.parse(stores.first['id'].toString());
       final orgRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action':   'getOrganisasiID',
             'store_id': _activeStoreID,
           }));
-      _organisasiID =
-          int.parse(orgRes.data['organisasi_id'].toString());
+      _organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
+      _isFnB        = (orgRes.data['is_fnb'] == 1);
 
       // Cek shift aktif user → untuk tahu store mana yang aktif
-      // (dipakai untuk print/WA/email — pakai setting store aktif)
       final shiftRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action':  'cekShiftUser',
@@ -78,6 +76,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       if (shiftRes.data['has_shift'] == true) {
         _activeStoreID   = shiftRes.data['store_id'];
         _activeStoreName = shiftRes.data['store_nama'];
+        // Override flag FnB dari shift (sudah ada di response cekShiftUser)
+        _isFnB = (shiftRes.data['is_fnb'] == 1);
       } else {
         _activeStoreName = stores.first['nama'].toString();
       }
@@ -103,7 +103,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   }
 
   Future<void> _loadInvoices() async {
-    final dio     = ApiService.getDio(token: _token);
+    final dio      = ApiService.getDio(token: _token);
     final dateFrom = _dateFrom.toIso8601String().substring(0, 10);
     final dateTo   = _dateTo.toIso8601String().substring(0, 10);
 
@@ -148,63 +148,222 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     }
   }
 
-  Future<void> _printInvoice(Map<String, dynamic> invoice) async {
-    try {
-      final isConnected = await PrinterHelper.isConnected();
-      if (!isConnected) {
-        final prefs = await SharedPreferences.getInstance();
-        final savedMac = prefs.getString('printer_mac');
-        if (savedMac == null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Belum ada printer. Buka Pengaturan Printer.'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-          return;
-        }
-        await PrinterHelper.connect(savedMac);
-      }
+  // ── Pastikan printer terkoneksi ──────────────────────────────
+  Future<bool> _ensurePrinterConnected() async {
+    final isConn = await PrinterHelper.isConnected();
+    if (isConn) return true;
 
-      // Ambil detail items
-      final dio = ApiService.getDio(token: _token);
-      final detailRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getInvoiceDetail',
-            'invoice_id': invoice['id'],
-          }));
-
-      final items = List<Map<String, dynamic>>.from(detailRes.data['data']);
-
-      await PrinterHelper.printInvoice(
-        storeName:    _activeStoreName,
-        storeAddress: _activeStoreAddress,
-        npwp:         _activeStoreNpwp,
-        invoiceNote:  _activeInvoiceNote,
-        invoiceNumber: invoice['kode'],
-        tanggal: invoice['tanggal'].toString().length >= 16
-            ? invoice['tanggal'].toString().substring(0, 16)
-            : invoice['tanggal'].toString(),
-        kasir:        invoice['kasir'] ?? '',
-        memberNama:   invoice['member'] ?? '',
-        items:        items,
-        gross:        (invoice['gross'] as num).toDouble(),
-        diskon:       (invoice['diskon'] as num).toDouble(),
-        total:        (invoice['total'] as num).toDouble(),
-        dpp:          0,
-        pajak:        0,
-        caraBayar:    invoice['cara_bayar'] ?? '',
-        nominalBayar: (invoice['bayar'] as num).toDouble(),
-        kembalian:    (invoice['kembalian'] as num).toDouble(),
-        voucherKode:  invoice['voucher_kode'],
-      );
-
+    final prefs    = await SharedPreferences.getInstance();
+    final savedMac = prefs.getString('printer_mac');
+    if (savedMac == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Print berhasil!'),
+            content: Text('Belum ada printer. Buka Pengaturan Printer.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return false;
+    }
+    return await PrinterHelper.connect(savedMac);
+  }
+
+  // ── Hit API trackPrint → kembalikan copyCount ────────────────
+  Future<int> _trackPrint(String kode) async {
+    try {
+      final dio = ApiService.getDio(token: _token);
+      final res = await dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'trackPrint',
+            'kode':   kode,
+          }));
+      if (res.data['success'] == true) {
+        return (res.data['count'] as num).toInt();
+      }
+    } catch (_) {}
+    return 1; // fallback: anggap first print agar tidak crash
+  }
+
+  // ── Ambil items dari API ─────────────────────────────────────
+  Future<List<Map<String, dynamic>>> _fetchItems(int invoiceId) async {
+    final dio = ApiService.getDio(token: _token);
+    final res = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action':     'getInvoiceDetail',
+          'invoice_id': invoiceId,
+        }));
+    return List<Map<String, dynamic>>.from(res.data['data']);
+  }
+
+  // ── ENTRY POINT print dari list ──────────────────────────────
+  //
+  // Untuk FnB → tampilkan bottom sheet pilih Customer/Kitchen/Keduanya
+  // Untuk non-FnB → langsung print customer
+  Future<void> _handlePrint(Map<String, dynamic> invoice) async {
+    if (_isFnB) {
+      await _showReprintSheet(invoice);
+    } else {
+      await _doPrint(invoice, printCustomer: true, printKitchen: false);
+    }
+  }
+
+  // ── Bottom sheet pilihan reprint untuk FnB ───────────────────
+  Future<void> _showReprintSheet(Map<String, dynamic> invoice) async {
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle bar
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 4),
+                child: Text(
+                  'Print Ulang — ${invoice['kode']}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ),
+              const Divider(),
+              // Pilihan
+              ListTile(
+                leading: const Icon(Icons.receipt_long,
+                    color: Color(0xFF1D273B)),
+                title: const Text('Customer Copy'),
+                subtitle: const Text('Struk untuk pelanggan'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _doPrint(invoice,
+                      printCustomer: true, printKitchen: false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.kitchen, color: Colors.orange),
+                title: const Text('Kitchen Copy'),
+                subtitle: const Text('Struk untuk dapur'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _doPrint(invoice,
+                      printCustomer: false, printKitchen: true);
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.print_rounded, color: Colors.green),
+                title: const Text('Customer + Kitchen'),
+                subtitle: const Text('Print dua-duanya'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _doPrint(invoice,
+                      printCustomer: true, printKitchen: true);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Eksekusi print sesungguhnya ──────────────────────────────
+  //
+  // [printCustomer] — cetak customer copy
+  // [printKitchen]  — cetak kitchen copy
+  //
+  // trackPrint dipanggil sekali di sini untuk mendapat copyCount
+  // yang dipakai sebagai ribbon pada kedua jenis struk.
+  Future<void> _doPrint(
+    Map<String, dynamic> invoice, {
+    required bool printCustomer,
+    required bool printKitchen,
+  }) async {
+    try {
+      // 1. Pastikan printer terkoneksi
+      final connected = await _ensurePrinterConnected();
+      if (!connected) return;
+
+      // 2. Ambil items & log print (dapat copyCount) secara paralel
+      final results = await Future.wait([
+        _fetchItems(invoice['id'] as int),
+        _trackPrint(invoice['kode']),
+      ]);
+      final items     = results[0] as List<Map<String, dynamic>>;
+      final copyCount = results[1] as int;
+
+      // 3. Siapkan data bersama
+      final tanggal = invoice['tanggal'].toString().length >= 16
+          ? invoice['tanggal'].toString().substring(0, 16)
+          : invoice['tanggal'].toString();
+
+      // 4. Print customer copy
+      if (printCustomer) {
+        await PrinterHelper.printInvoice(
+          storeName:    _activeStoreName,
+          storeAddress: _activeStoreAddress,
+          npwp:         _activeStoreNpwp,
+          invoiceNote:  _activeInvoiceNote,
+          invoiceNumber: invoice['kode'],
+          tanggal:      tanggal,
+          kasir:        invoice['kasir'] ?? '',
+          memberNama:   invoice['member'] ?? '',
+          items:        items,
+          gross:        (invoice['gross'] as num).toDouble(),
+          diskon:       (invoice['diskon'] as num).toDouble(),
+          total:        (invoice['total'] as num).toDouble(),
+          dpp:          0,
+          pajak:        0,
+          caraBayar:    invoice['cara_bayar'] ?? '',
+          nominalBayar: (invoice['bayar'] as num).toDouble(),
+          kembalian:    (invoice['kembalian'] as num).toDouble(),
+          voucherKode:  invoice['voucher_kode'],
+          copyCount:    copyCount, // ribbon COPY N jika >= 2
+        );
+      }
+
+      // 5. Jeda singkat sebelum kitchen agar buffer tidak penuh
+      if (printCustomer && printKitchen) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      // 6. Print kitchen copy
+      if (printKitchen) {
+        await PrinterHelper.printKitchen(
+          storeName:     _activeStoreName,
+          invoiceNumber: invoice['kode'],
+          tanggal:       tanggal,
+          kasir:         invoice['kasir'] ?? '',
+          items:         items,
+          total:         (invoice['total'] as num).toDouble(),
+          copyCount:     copyCount, // ribbon COPY N jika >= 2
+        );
+      }
+
+      if (mounted) {
+        final label = printCustomer && printKitchen
+            ? 'Customer + Kitchen'
+            : printCustomer
+                ? 'Customer'
+                : 'Kitchen';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Print $label berhasil!'),
             backgroundColor: Colors.green,
           ),
         );
@@ -455,13 +614,15 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                       const SizedBox(height: 8),
                                       Row(
                                         children: [
-                                          // Print
+                                          // Print — _handlePrint menangani FnB vs non-FnB
                                           IconButton(
                                             icon: const Icon(Icons.print,
                                                 color: Color(0xFF1D273B)),
-                                            tooltip: 'Print',
+                                            tooltip: _isFnB
+                                                ? 'Print Ulang'
+                                                : 'Print',
                                             onPressed: () =>
-                                                _printInvoice(inv),
+                                                _handlePrint(inv),
                                           ),
                                           // WA
                                           if (_waEnabled == 1 &&

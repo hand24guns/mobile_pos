@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.0.2.2/trial/pos/api';
+  static const String baseUrl = 'https://pos.aibipi.com/api';
 
   static Dio getDio({String? token}) {
     final options = BaseOptions(

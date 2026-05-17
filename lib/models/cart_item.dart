@@ -3,6 +3,8 @@ import '../utils/currency_format.dart';
 class CartItem {
   final String kode;
   final String nama;
+  final String?
+      packagesNotes; // Ini tetap final jika tidak diubah setelah object dibuat
   int qty;
   double hpj;
   double diskonPersen;
@@ -14,6 +16,7 @@ class CartItem {
     required this.nama,
     required this.qty,
     required this.hpj,
+    this.packagesNotes, // Parameter bernama (Named Parameter)
     this.diskonPersen = 0,
     this.diskonNominal = 0,
     double? subtotal,
@@ -29,13 +32,18 @@ class CartItem {
 
   factory CartItem.fromJson(Map<String, dynamic> json) {
     return CartItem(
-      kode: json['kode'],
-      nama: json['nama'],
+      kode: json['kode'] ?? '',
+      nama: json['nama'] ?? '',
       qty: int.tryParse(json['qty'].toString()) ?? 0,
       hpj: double.tryParse(json['hpj'].toString().replaceAll(',', '')) ?? 0,
-      diskonPersen: double.tryParse(json['diskon_persen']?.toString() ?? '0') ?? 0,
-      diskonNominal: double.tryParse(json['diskon_nominal']?.toString() ?? '0') ?? 0,
-      subtotal: double.tryParse(json['subtotal'].toString().replaceAll(',', '')) ?? 0,
+      packagesNotes: json['packages_notes']
+          as String?, // Pastikan menggunakan titik dua (:) bukan sama dengan (=)
+      diskonPersen:
+          double.tryParse(json['diskon_persen']?.toString() ?? '0') ?? 0,
+      diskonNominal:
+          double.tryParse(json['diskon_nominal']?.toString() ?? '0') ?? 0,
+      subtotal:
+          double.tryParse(json['subtotal'].toString().replaceAll(',', '')) ?? 0,
     );
   }
 }

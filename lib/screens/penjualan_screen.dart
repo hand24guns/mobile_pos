@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
@@ -12,6 +14,9 @@ import 'printer_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/printer_helper.dart';
 import 'invoice_list_screen.dart';
+// ── Widget baru ───────────────────────────────────────────────
+import '../widgets/package_dialog.dart';
+import '../widgets/add_member_sheet.dart';
 
 class PenjualanScreen extends ConsumerStatefulWidget {
   const PenjualanScreen({super.key});
@@ -32,56 +37,136 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   int _shiftID = 0;
   bool _isLoading = true;
 
+  // ── Shift polling ─────────────────────────────────────────────
+  Timer? _shiftPollingTimer;
+  int _activeStoreID = 0;
+  int _activeOrgID = 0;
+  String _activeStoreName = '';
+  bool _isFnb = false;   // true jika jasa_perusahaan == 3 (FnB/resto)
+
   List<Map<String, dynamic>> _channels = [];
   List<Map<String, dynamic>> _caraBayarList = [];
+
+  // ── Product image grid ────────────────────────────────────────
+  List<Map<String, dynamic>> _imageProducts = [];
+  bool _isLoadingImages = false;
 
   @override
   void initState() {
     super.initState();
     _loadInitialData();
+    _startShiftPolling();
   }
 
+  @override
+  void dispose() {
+    _shiftPollingTimer?.cancel();
+    _skuController.dispose();
+    _memberController.dispose();
+    _nominalController.dispose();
+    super.dispose();
+  }
+
+  // ============================================================
+  // SHIFT POLLING — cek status shift tiap 60 detik
+  // ============================================================
+  void _startShiftPolling() {
+    _shiftPollingTimer?.cancel();
+    _shiftPollingTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      _checkShiftStillActive();
+    });
+  }
+
+  Future<void> _checkShiftStillActive() async {
+    if (_shiftID == 0 || _activeStoreID == 0 || _activeOrgID == 0) return;
+    try {
+      final result = await ShiftService.cekShift(
+        token: _token,
+        storeID: _activeStoreID,
+        organisasiID: _activeOrgID,
+        userID: _userID,
+      );
+      final stillActive =
+          result.status == ShiftStatus.milikSaya && result.shiftID == _shiftID;
+      if (!stillActive && mounted) _onShiftForceClosed();
+    } catch (_) {
+      // Offline/timeout → diam saja
+    }
+  }
+
+  void _onShiftForceClosed() {
+    _shiftPollingTimer?.cancel();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Shift Ditutup'),
+        content: const Text(
+          'Shift kamu telah ditutup dari perangkat lain.\n'
+          'Silakan buka shift baru untuk melanjutkan.',
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                _shiftID = 0;
+                _activeStoreID = 0;
+                _activeOrgID = 0;
+                _activeStoreName = '';
+                _isFnb = false;
+                _isLoading = true;
+              });
+              _loadInitialData();
+              _startShiftPolling();
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1D273B)),
+            child: const Text('OK', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // LOAD INITIAL DATA
+  // ============================================================
   Future<void> _loadInitialData() async {
     try {
       final session = await SessionService.getSession();
-      _token       = session['token'];
-      _userID      = session['user_id'];
+      _token = session['token'];
+      _userID = session['user_id'];
       _deviceToken = await SessionService.getDeviceToken();
 
       final dio = ApiService.getDio(token: _token);
 
-      // ============================================================
-      // STEP 1 — Cek apakah user sudah punya shift aktif (store manapun)
-      // Jika ya → bypass store picker, langsung pakai store dari shift
-      // ============================================================
+      // STEP 1 — Cek shift user aktif
       final shiftUserRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':  'cekShiftUser',
+            'action': 'cekShiftUser',
             'user_id': _userID,
           }));
 
-      int    storeID      = 0;
-      int    organisasiID = 0;
-      String storeName    = '';
+      int storeID = 0;
+      int organisasiID = 0;
+      String storeName = '';
 
       if (shiftUserRes.data['has_shift'] == true) {
-        // Sudah ada shift aktif milik user ini → langsung masuk
-        storeID      = shiftUserRes.data['store_id'];
+        storeID = shiftUserRes.data['store_id'];
         organisasiID = shiftUserRes.data['organisasi_id'];
-        storeName    = shiftUserRes.data['store_nama'];
-        _shiftID     = shiftUserRes.data['shift_id'];
-
+        storeName = shiftUserRes.data['store_nama'];
+        _shiftID = shiftUserRes.data['shift_id'];
+        _isFnb = (shiftUserRes.data['is_fnb'] as int? ?? 0) == 1;
       } else {
-        // ============================================================
-        // STEP 2 — Belum ada shift → load stores → tampil picker
-        // ============================================================
+        // STEP 2 — Pilih store
         final storeRes = await dio.post('/penjualan.php',
             data: FormData.fromMap({
-              'action':  'getStores',
+              'action': 'getStores',
               'user_id': _userID,
             }));
-        final stores =
-            List<Map<String, dynamic>>.from(storeRes.data['data']);
+        final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
 
         Map<String, dynamic>? pickedStore;
         if (stores.length == 1) {
@@ -95,29 +180,26 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           }
         }
 
-        storeID   = int.parse(pickedStore['id'].toString());
+        storeID = int.parse(pickedStore['id'].toString());
         storeName = pickedStore['nama'].toString();
 
         final orgRes = await dio.post('/penjualan.php',
             data: FormData.fromMap({
-              'action':   'getOrganisasiID',
+              'action': 'getOrganisasiID',
               'store_id': storeID,
             }));
-        organisasiID =
-            int.parse(orgRes.data['organisasi_id'].toString());
+        organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
+        _isFnb = (orgRes.data['is_fnb'] as int? ?? 0) == 1;
 
-        // ============================================================
-        // STEP 3 — Cek shift di store yang dipilih
-        // ============================================================
+        // STEP 3 — Cek shift store
         final shiftRes = await ShiftService.cekShift(
-          token:        _token,
-          storeID:      storeID,
+          token: _token,
+          storeID: storeID,
           organisasiID: organisasiID,
-          userID:       _userID,
+          userID: _userID,
         );
 
         if (shiftRes.status == ShiftStatus.milikOrangLain) {
-          // Store sedang dipakai user lain → warning → reload (pilih store lain)
           if (mounted) {
             await showDialog(
               context: context,
@@ -125,30 +207,29 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               builder: (_) => AlertDialog(
                 title: const Text('Store Sedang Digunakan'),
                 content: Text(
-                  'Store $storeName sedang digunakan oleh ${shiftRes.kasirNama}.\n\nSilahkan pilih store lain atau minta kasir tersebut menutup shiftnya.',
+                  'Store $storeName sedang digunakan oleh ${shiftRes.kasirNama}.\n\n'
+                  'Silahkan pilih store lain atau minta kasir tersebut menutup shiftnya.',
                 ),
                 actions: [
                   ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF1D273B)),
-                    child: const Text('OK',
-                        style: TextStyle(color: Colors.white)),
+                    child:
+                        const Text('OK', style: TextStyle(color: Colors.white)),
                   ),
                 ],
               ),
             );
-            // Restart alur dari awal
             _loadInitialData();
             return;
           }
         }
 
         if (shiftRes.status == ShiftStatus.tidakAda) {
-          // Store kosong → buka shift baru
           if (!mounted) return;
           final shiftID = await _showBukaShiftDialog(
-            storeID:      storeID,
+            storeID: storeID,
             organisasiID: organisasiID,
           );
           if (shiftID == 0) {
@@ -157,25 +238,21 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           }
           _shiftID = shiftID;
         }
-        // milikSaya tidak mungkin terjadi di sini karena STEP 1 sudah handle
       }
 
-      // ============================================================
-      // STEP 4 — Load number, channels, cara bayar → masuk PenjualanScreen
-      // ============================================================
+      // STEP 4 — Load number, channels, cara bayar
       final numberRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':        'getNumber',
-            'store_id':      storeID,
+            'action': 'getNumber',
+            'store_id': storeID,
             'organisasi_id': organisasiID,
-            'device_token':  _deviceToken,
+            'device_token': _deviceToken,
           }));
       final number = numberRes.data['number'];
 
       final channelRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({'action': 'getChannels'}));
-      _channels =
-          List<Map<String, dynamic>>.from(channelRes.data['data']);
+      _channels = List<Map<String, dynamic>>.from(channelRes.data['data']);
 
       final caraBayarRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({'action': 'getCaraBayar'}));
@@ -183,19 +260,22 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           List<Map<String, dynamic>>.from(caraBayarRes.data['data']);
 
       ref.read(penjualanProvider.notifier).setInitialData(
-            number:       number,
-            storeID:      storeID,
-            storeName:    storeName,
+            number: number,
+            storeID: storeID,
+            storeName: storeName,
             organisasiID: organisasiID,
             salesTipeID:
                 int.parse(_channels.first['dim_salestipe_id'].toString()),
           );
 
-      setState(() => _isLoading = false);
+      _activeStoreID = storeID;
+      _activeOrgID = organisasiID;
+      _activeStoreName = storeName;
 
-    } catch (e, stackTrace) {
-      print('ERROR: $e');
-      print('STACK: $stackTrace');
+      setState(() => _isLoading = false);
+      _loadImageProducts();
+    } catch (e, st) {
+      debugPrint('ERROR: $e\n$st');
       setState(() => _isLoading = false);
     }
   }
@@ -211,206 +291,162 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   // ============================================================
-  // STORE PICKER — Modal Bottom Sheet, scrollable, support list panjang
+  // STORE PICKER — Modal Bottom Sheet
   // ============================================================
   Future<Map<String, dynamic>?> _showStorePicker(
       List<Map<String, dynamic>> stores) async {
     Map<String, dynamic>? selected;
-
     return showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       isDismissible: false,
       enableDrag: false,
       backgroundColor: Colors.transparent,
-      builder: (_) {
-        return StatefulBuilder(
-          builder: (ctx, setState) {
-            return Container(
-              // max 75% tinggi layar supaya tidak full screen
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.75,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setState) => Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
+          ),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Handle bar
-                  Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-
-                  // Header
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.store,
-                            color: Color(0xFF1D273B), size: 22),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Text(
-                            'Pilih Store',
-                            style: TextStyle(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.store, color: Color(0xFF1D273B), size: 22),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text('Pilih Store',
+                          style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF1D273B),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${stores.length} store',
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade500),
-                        ),
-                      ],
+                              color: Color(0xFF1D273B))),
                     ),
-                  ),
-
-                  const Divider(height: 1),
-
-                  // List store — scrollable
-                  Flexible(
-                    child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      shrinkWrap: true,
-                      itemCount: stores.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 6),
-                      itemBuilder: (_, i) {
-                        final s = stores[i];
-                        final isSelected = selected?['id'].toString() ==
-                            s['id'].toString();
-                        return InkWell(
-                          onTap: () => setState(() => selected = s),
-                          borderRadius: BorderRadius.circular(10),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 150),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 14),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? const Color(0xFF1D273B)
-                                  : Colors.grey.shade50,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isSelected
-                                    ? const Color(0xFF1D273B)
-                                    : Colors.grey.shade200,
-                                width: isSelected ? 2 : 1,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  isSelected
-                                      ? Icons.store
-                                      : Icons.store_outlined,
-                                  color: isSelected
-                                      ? Colors.white
-                                      : Colors.grey.shade500,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    s['nama'].toString(),
-                                    style: TextStyle(
-                                      color: isSelected
-                                          ? Colors.white
-                                          : Colors.black87,
-                                      fontWeight: isSelected
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                      fontSize: 15,
-                                    ),
-                                  ),
-                                ),
-                                if (isSelected)
-                                  const Icon(Icons.check_circle,
-                                      color: Colors.white, size: 18),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                  // Footer buttons
-                  const Divider(height: 1),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx, null),
-                            style: OutlinedButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              side: const BorderSide(
-                                  color: Color(0xFF1D273B)),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: const Text('Batal',
-                                style:
-                                    TextStyle(color: Color(0xFF1D273B))),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton(
-                            onPressed: selected == null
-                                ? null
-                                : () => Navigator.pop(ctx, selected),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1D273B),
-                              disabledBackgroundColor:
-                                  Colors.grey.shade300,
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: Text(
-                              selected == null
-                                  ? 'Pilih Store Dulu'
-                                  : 'Masuk ke ${selected!['nama']}',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                    Text('${stores.length} store',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade500)),
+                  ],
+                ),
               ),
-            );
-          },
-        );
-      },
+              const Divider(height: 1),
+              Flexible(
+                child: ListView.separated(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  shrinkWrap: true,
+                  itemCount: stores.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (_, i) {
+                    final s = stores[i];
+                    final isSelected =
+                        selected?['id'].toString() == s['id'].toString();
+                    return InkWell(
+                      onTap: () => setState(() => selected = s),
+                      borderRadius: BorderRadius.circular(10),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF1D273B)
+                              : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF1D273B)
+                                : Colors.grey.shade200,
+                            width: isSelected ? 2 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isSelected ? Icons.store : Icons.store_outlined,
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.grey.shade500,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(s['nama'].toString(),
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    fontWeight: isSelected
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    fontSize: 15,
+                                  )),
+                            ),
+                            if (isSelected)
+                              const Icon(Icons.check_circle,
+                                  color: Colors.white, size: 18),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, null),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: selected == null
+                            ? null
+                            : () => Navigator.pop(ctx, selected),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1D273B)),
+                        child: Text(
+                          selected == null
+                              ? 'Pilih Store'
+                              : 'Masuk ke ${selected!['nama']}',
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   // ============================================================
-  // BUKA SHIFT — modal input modal kasir
-  // Return shift_id jika berhasil, 0 jika user cancel
+  // BUKA SHIFT
   // ============================================================
   Future<int> _showBukaShiftDialog({
     required int storeID,
@@ -444,15 +480,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1D273B)),
-            child: const Text('Buka Shift',
-                style: TextStyle(color: Colors.white)),
+            child:
+                const Text('Buka Shift', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -466,43 +501,41 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         0;
 
     final shiftID = await ShiftService.bukaShift(
-      token:        _token,
-      storeID:      storeID,
+      token: _token,
+      storeID: storeID,
       organisasiID: organisasiID,
-      userID:       _userID,
-      modalKasir:   modal,
+      userID: _userID,
+      modalKasir: modal,
     );
 
     if (shiftID == 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Gagal buka shift'),
-          backgroundColor: Colors.red,
-        ),
+            content: Text('Gagal buka shift'), backgroundColor: Colors.red),
       );
     }
     return shiftID;
   }
 
   // ============================================================
-  // TUTUP SHIFT — ambil rekap dulu lalu konfirmasi
+  // TUTUP SHIFT
   // ============================================================
   Future<void> _tutupShift() async {
     final state = ref.read(penjualanProvider);
 
     final rekap = await ShiftService.getRekapShift(
-      token:        _token,
-      shiftID:      _shiftID,
-      storeID:      state.storeID,
+      token: _token,
+      shiftID: _shiftID,
+      storeID: state.storeID,
       organisasiID: state.organisasiID,
     );
 
     if (rekap.isEmpty || !mounted) return;
 
-    final openShift  = rekap['open_shift'] ?? '';
+    final openShift = rekap['open_shift'] ?? '';
     final modalKasir = (rekap['modal_kasir'] as num).toDouble();
     final totalSales = (rekap['total_sales'] as num).toDouble();
-    final jumlahInv  = rekap['jumlah_invoice'] as int;
+    final jumlahInv = rekap['jumlah_invoice'] as int;
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -524,9 +557,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -540,11 +572,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     if (confirm != true) return;
 
     final berhasil = await ShiftService.tutupShift(
-      token:         _token,
-      shiftID:       _shiftID,
-      storeID:       state.storeID,
-      organisasiID:  state.organisasiID,
-      totalSales:    totalSales,
+      token: _token,
+      shiftID: _shiftID,
+      storeID: state.storeID,
+      organisasiID: state.organisasiID,
+      totalSales: totalSales,
       jumlahInvoice: jumlahInv,
     );
 
@@ -575,8 +607,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               },
               style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1D273B)),
-              child: const Text('Selesai',
-                  style: TextStyle(color: Colors.white)),
+              child:
+                  const Text('Selesai', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -584,26 +616,25 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Gagal menutup shift'),
-          backgroundColor: Colors.red,
-        ),
+            content: Text('Gagal menutup shift'), backgroundColor: Colors.red),
       );
     }
   }
 
-  Widget _rekapRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
+  Widget _rekapRow(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: const TextStyle(color: Colors.grey)),
+            Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+      );
 
+  // ============================================================
+  // SEARCH PRODUK — cek package dulu sebelum insert
+  // ============================================================
   Future<void> _searchProduk(String sku) async {
     if (sku.isEmpty) return;
     final state = ref.read(penjualanProvider);
@@ -626,46 +657,157 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       return;
     }
 
-    // Jika hanya 1 hasil langsung tambah ke cart
     if (data.length == 1) {
-      _addToCart(data.first);
+      await _insertProduk(data.first['kode'] as String);
     } else {
-      // Tampilkan pilihan
       _showProductPicker(data);
     }
     _skuController.clear();
   }
 
-  Future<void> _addToCart(Map<String, dynamic> produk) async {
+  // ============================================================
+  // INSERT PRODUK — wrap: cek package dulu
+  // ============================================================
+  Future<void> _insertProduk(String sku) async {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    // Insert ke temp_invoice via API
-    await dio.post('/penjualan.php',
+    // Cek apakah produk ini package
+    final cekRes = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'insertItem',
-          'number':        state.number,
-          'sku':           produk['kode'],
+          'action': 'cekPackage',
+          'sku': sku,
           'organisasi_id': state.organisasiID,
-          'store_id':      state.storeID,
-          'member_id':     state.memberID ?? 0,
-          'voucher':       _activeVoucher,
-          'device_token':  _deviceToken,
         }));
 
-    // Refresh items + summary dari API
-    await _refreshFromApi();
+    if (cekRes.data['is_package'] == true) {
+      // ── Produk package → tampilkan dialog pilihan isian + addon ──
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PackageDialog(
+          sku: sku,
+          packageData: Map<String, dynamic>.from(cekRes.data),
+          onConfirm: (isianDipilih, addonDipilih, addonTotal) {
+            _doInsertPackage(
+              sku: sku,
+              isianDipilih: isianDipilih,
+              addonDipilih: addonDipilih,
+              addonTotal: addonTotal,
+            );
+          },
+        ),
+      );
+    } else {
+      // ── Produk biasa → insert langsung ────────────────────────
+      await _doInsertProduk(sku);
+    }
+  }
+
+  /// Insert produk biasa ke temp_invoice
+  Future<void> _doInsertProduk(String sku) async {
+    final state = ref.read(penjualanProvider);
+    final dio = ApiService.getDio(token: _token);
+
+    final res = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'insertItem',
+          'number': state.number,
+          'sku': sku,
+          'organisasi_id': state.organisasiID,
+          'store_id': state.storeID,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'device_token': _deviceToken,
+        }));
+
+    if (res.data['success'] == true) {
+      _checkVoucherValid(res.data);
+      await _refreshFromApi();
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res.data['message'] ?? 'Gagal menambahkan produk'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
     _skuController.clear();
   }
 
+  /// Insert produk package ke temp_invoice
+  Future<void> _doInsertPackage({
+    required String sku,
+    required List<Map<String, dynamic>> isianDipilih,
+    required List<Map<String, dynamic>> addonDipilih,
+    required double addonTotal,
+  }) async {
+    final state = ref.read(penjualanProvider);
+    final dio = ApiService.getDio(token: _token);
+
+    final res = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'insertPackage',
+          'number': state.number,
+          'sku': sku,
+          'organisasi_id': state.organisasiID,
+          'store_id': state.storeID,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'device_token': _deviceToken,
+          'isian': jsonEncode(isianDipilih),
+          'addon': jsonEncode(addonDipilih),
+          'addon_harga': addonTotal,
+        }));
+
+    if (res.data['success'] == true) {
+      _checkVoucherValid(res.data);
+      await _refreshFromApi();
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text(res.data['message'] ?? 'Gagal menambahkan produk package'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ============================================================
+  // CEK VOUCHER VALID — auto-lepas jika tidak memenuhi syarat
+  // ============================================================
+  void _checkVoucherValid(Map<String, dynamic> responseData) {
+    if (_activeVoucher.isNotEmpty && responseData['voucher_valid'] == false) {
+      setState(() => _activeVoucher = '');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Voucher dilepas — total belanja tidak memenuhi syarat'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+  }
+
+  // ============================================================
+  // REFRESH CART & SUMMARY
+  // ============================================================
   Future<void> _refreshFromApi() async {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
     final itemsRes = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':       'getItems',
-          'number':       state.number,
+          'action': 'getItems',
+          'number': state.number,
           'device_token': _deviceToken,
         }));
 
@@ -674,14 +816,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     final summaryRes = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':       'getSummary',
-          'number':       state.number,
-          'store_id':     state.storeID,
+          'action': 'getSummary',
+          'number': state.number,
+          'store_id': state.storeID,
           'device_token': _deviceToken,
         }));
 
     final summary = summaryRes.data;
-
     ref.read(penjualanProvider.notifier).updateItems(items);
     ref.read(penjualanProvider.notifier).updateSummary(
           gross: (summary['gross'] as num).toDouble(),
@@ -690,6 +831,34 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           dpp: (summary['dpp'] as num).toDouble(),
           pajak: (summary['tax'] as num).toDouble(),
         );
+  }
+
+  // ============================================================
+  // LOAD PRODUK DENGAN IMAGE untuk grid kiri
+  // ============================================================
+  Future<void> _loadImageProducts() async {
+    if (_isLoadingImages) return;
+    setState(() => _isLoadingImages = true);
+    try {
+      final state = ref.read(penjualanProvider);
+      final dio = ApiService.getDio(token: _token);
+      final res = await dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getImageProducts',
+            'organisasi_id': state.organisasiID,
+          }));
+      final raw = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
+      // Filter client-side: hanya produk yang image-nya tidak null/kosong
+      final filtered = raw.where((p) {
+        final img = p['image']?.toString() ?? '';
+        return img.isNotEmpty;
+      }).toList();
+      if (mounted) setState(() => _imageProducts = filtered);
+    } catch (_) {
+      // Diam saja jika gagal
+    } finally {
+      if (mounted) setState(() => _isLoadingImages = false);
+    }
   }
 
   void _showProductPicker(List<Map<String, dynamic>> products) {
@@ -705,7 +874,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             trailing: Text('Rp ${CurrencyFormat.format(p['hpj'])}'),
             onTap: () {
               Navigator.pop(context);
-              _addToCart(p);
+              _insertProduk(p['kode'] as String);
             },
           );
         },
@@ -713,6 +882,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     );
   }
 
+  // ============================================================
+  // REMOVE & UPDATE QTY
+  // ============================================================
   Future<void> _removeItem(int index) async {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
@@ -720,14 +892,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'deleteItem',
-          'number':        state.number,
-          'sku':           item.kode,
-          'store_id':      state.storeID,
+          'action': 'deleteItem',
+          'number': state.number,
+          'sku': item.kode,
+          'packages_notes': item.packagesNotes ?? '',
+          'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
-          'member_id':     state.memberID ?? 0,
-          'voucher':       _activeVoucher,
-          'device_token':  _deviceToken,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'device_token': _deviceToken,
         }));
 
     await _refreshFromApi();
@@ -738,27 +911,74 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       await _removeItem(index);
       return;
     }
-
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
     final item = state.items[index];
 
     await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'updateQty',
-          'number':        state.number,
-          'sku':           item.kode,
-          'qty':           qty,
-          'store_id':      state.storeID,
+          'action': 'updateQty',
+          'number': state.number,
+          'sku': item.kode,
+          'qty': qty,
+          'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
-          'member_id':     state.memberID ?? 0,
-          'voucher':       _activeVoucher,
-          'device_token':  _deviceToken,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'device_token': _deviceToken,
         }));
 
     await _refreshFromApi();
   }
 
+  // ============================================================
+  // MEMBER — Add Member Baru (bottom sheet)
+  // ============================================================
+  void _showAddMemberSheet() {
+    final state = ref.read(penjualanProvider);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => AddMemberSheet(
+        token: _token,
+        organisasiID: state.organisasiID,
+        onSuccess: (memberID, display, nama) async {
+          // Set member ke state + field
+          _memberController.text = display;
+          ref.read(penjualanProvider.notifier).setMember(memberID, nama);
+
+          // Recalculate diskon dengan member baru
+          final dio = ApiService.getDio(token: _token);
+          await dio.post('/penjualan.php',
+              data: FormData.fromMap({
+                'action': 'recalculate',
+                'number': state.number,
+                'store_id': state.storeID,
+                'organisasi_id': state.organisasiID,
+                'member_id': memberID,
+                'voucher': _activeVoucher,
+                'device_token': _deviceToken,
+              }));
+
+          await _refreshFromApi();
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Member "$nama" berhasil ditambahkan'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  // ============================================================
+  // VOUCHER
+  // ============================================================
   void _showVoucherDialog() {
     final voucherController = TextEditingController();
     showDialog(
@@ -788,7 +1008,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                       },
                       child:
                           const Icon(Icons.close, size: 18, color: Colors.red),
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -804,9 +1024,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () async {
               final kode = voucherController.text.trim();
@@ -827,13 +1046,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'cekVoucher',
-          'number':        state.number,
-          'voucher':       kode,
-          'store_id':      state.storeID,
+          'action': 'cekVoucher',
+          'number': state.number,
+          'voucher': kode,
+          'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
-          'member_id':     state.memberID ?? 0,
-          'device_token':  _deviceToken,
+          'member_id': state.memberID ?? 0,
+          'device_token': _deviceToken,
         }));
 
     if (res.data['success'] == true) {
@@ -865,20 +1084,20 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':       'resetDiskon',
-          'number':       state.number,
+          'action': 'resetDiskon',
+          'number': state.number,
           'device_token': _deviceToken,
         }));
 
     await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'recalculate',
-          'number':        state.number,
-          'store_id':      state.storeID,
+          'action': 'recalculate',
+          'number': state.number,
+          'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
-          'member_id':     state.memberID ?? 0,
-          'voucher':       '',
-          'device_token':  _deviceToken,
+          'member_id': state.memberID ?? 0,
+          'voucher': '',
+          'device_token': _deviceToken,
         }));
 
     setState(() => _activeVoucher = '');
@@ -890,6 +1109,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     }
   }
 
+  // ============================================================
+  // RETUR
+  // ============================================================
   void _showReturDialog() {
     final returController = TextEditingController();
     showDialog(
@@ -906,9 +1128,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () async {
               final nomor = returController.text.trim();
@@ -928,7 +1149,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    // Cek nomor retur
     final cekRes = await dio.post('/penjualan.php',
         data: FormData.fromMap({
           'action': 'cekRetur',
@@ -951,16 +1171,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     final loadRes = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'loadRetur',
-          'retur_number':  returNumber,
-          'number':        state.number,
-          'store_id':      state.storeID,
+          'action': 'loadRetur',
+          'retur_number': returNumber,
+          'number': state.number,
+          'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
-          'device_token':  _deviceToken,
+          'device_token': _deviceToken,
         }));
 
     if (loadRes.data['success'] == true) {
-      // Simpan retur source ke provider
       ref.read(penjualanProvider.notifier).setReturSource(returNumber);
       await _refreshFromApi();
       if (mounted) {
@@ -983,32 +1202,28 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     }
   }
 
+  // ============================================================
+  // PROSES BAYAR
+  // ============================================================
   Future<void> _prosesBayar() async {
     final state = ref.read(penjualanProvider);
 
-    // Validasi
     if (state.items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Belum ada produk')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Belum ada produk')));
       return;
     }
-
     if (state.caraBayarID == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pilih cara bayar dulu')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Pilih cara bayar dulu')));
       return;
     }
-
     if (state.nominalBayar < state.total) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nominal bayar kurang dari total')),
-      );
+          const SnackBar(content: Text('Nominal bayar kurang dari total')));
       return;
     }
 
-    // Konfirmasi
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -1016,48 +1231,37 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Total'),
-                Text('Rp ${CurrencyFormat.format(state.total)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-              ],
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Bayar'),
-                Text('Rp ${CurrencyFormat.format(state.nominalBayar)}'),
-              ],
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('Total'),
+              Text('Rp ${CurrencyFormat.format(state.total)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ]),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('Bayar'),
+              Text('Rp ${CurrencyFormat.format(state.nominalBayar)}'),
+            ]),
             const Divider(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Kembalian',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                Text(
-                  'Rp ${CurrencyFormat.format(state.nominalBayar - state.total)}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Color(0xFF1D273B)),
-                ),
-              ],
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('Kembalian',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(
+                'Rp ${CurrencyFormat.format(state.nominalBayar - state.total)}',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                    color: Color(0xFF1D273B)),
+              ),
+            ]),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1D273B),
-            ),
+                backgroundColor: const Color(0xFF1D273B)),
             child: const Text('Proses', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -1066,7 +1270,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     if (confirm != true) return;
 
-    // Loading
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1078,18 +1281,18 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'prosesBayar',
-          'number':        state.number,
+          'action': 'prosesBayar',
+          'number': state.number,
           'cara_bayar_id': state.caraBayarID,
-          'store_id':      state.storeID,
+          'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
-          'user_id':       session['user_id'],
+          'user_id': session['user_id'],
           'sales_tipe_id': state.salesTipeID,
-          'member_id':     state.memberID ?? 0,
-          'voucher':       _activeVoucher,
-          'retur_source':  ref.read(penjualanProvider).returSource,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'retur_source': ref.read(penjualanProvider).returSource,
           'nominal_bayar': state.nominalBayar,
-          'device_token':  _deviceToken,
+          'device_token': _deviceToken,
         }));
 
     if (mounted) Navigator.pop(context); // tutup loading
@@ -1097,7 +1300,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     if (res.data['success'] == true) {
       final kembalian = res.data['kembalian'];
 
-      // Kirim WA & Email di background
       _kirimWADanEmail(
         invoiceNumber: state.number,
         storeID: state.storeID,
@@ -1123,21 +1325,42 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               ],
             ),
             actions: [
+              // ── Print customer + kitchen (FnB) ──────────────
               TextButton.icon(
                 onPressed: () async {
-                  await _printInvoice(
+                  await _handlePrint(
                     invoiceNumber: state.number,
-                    kembalian: (kembalian as num).toDouble(),
-                    caraBayar: _caraBayarList.firstWhere(
+                    kembalian    : (kembalian as num).toDouble(),
+                    caraBayar    : _caraBayarList.firstWhere(
                       (c) =>
                           int.parse(c['dim_carabayar_id'].toString()) ==
                           state.caraBayarID,
                       orElse: () => {'nama': ''},
                     )['nama'],
-                    currentState: state,
+                    currentState : state,
+                    isKitchenMode: true,
                   );
                 },
-                icon: const Icon(Icons.print),
+                icon: const Icon(Icons.print, size: 18),
+                label: const Text('Print (2x)'),
+              ),
+              // ── Print customer only (retail) ─────────────────
+              TextButton.icon(
+                onPressed: () async {
+                  await _handlePrint(
+                    invoiceNumber: state.number,
+                    kembalian    : (kembalian as num).toDouble(),
+                    caraBayar    : _caraBayarList.firstWhere(
+                      (c) =>
+                          int.parse(c['dim_carabayar_id'].toString()) ==
+                          state.caraBayarID,
+                      orElse: () => {'nama': ''},
+                    )['nama'],
+                    currentState : state,
+                    isKitchenMode: false,
+                  );
+                },
+                icon: const Icon(Icons.receipt_long, size: 18),
                 label: const Text('Print'),
               ),
               ElevatedButton(
@@ -1170,10 +1393,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     required int? memberID,
   }) async {
     if (memberID == null || memberID == 0) return;
-
     final dio = ApiService.getDio(token: _token);
 
-    // Kirim WA di background
     dio
         .post('/penjualan.php',
             data: FormData.fromMap({
@@ -1183,13 +1404,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               'organisasi_id': organisasiID,
               'member_id': memberID,
             }))
-        .then((res) {
-      print('WA: ${res.data}');
-    }).catchError((e) {
-      print('WA error: $e');
-    });
+        .then((r) => debugPrint('WA: ${r.data}'))
+        .catchError((e) => debugPrint('WA error: $e'));
 
-    // Kirim Email di background
     dio
         .post('/penjualan.php',
             data: FormData.fromMap({
@@ -1199,17 +1416,12 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               'organisasi_id': organisasiID,
               'member_id': memberID,
             }))
-        .then((res) {
-      print('Email: ${res.data}');
-    }).catchError((e) {
-      print('Email error: $e');
-    });
+        .then((r) => debugPrint('Email: ${r.data}'))
+        .catchError((e) => debugPrint('Email error: $e'));
   }
 
   Future<void> _resetTransaksi() async {
     final dio = ApiService.getDio(token: _token);
-
-    // Simpan data store dulu sebelum reset
     final currentState = ref.read(penjualanProvider);
     final storeID = currentState.storeID;
     final storeName = currentState.storeName;
@@ -1217,12 +1429,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     final numberRes = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'getNumber',
-          'store_id':      storeID,
+          'action': 'getNumber',
+          'store_id': storeID,
           'organisasi_id': organisasiID,
-          'device_token':  _deviceToken,
+          'device_token': _deviceToken,
         }));
-
     final newNumber = numberRes.data['number'];
 
     ref.read(penjualanProvider.notifier).reset();
@@ -1237,22 +1448,35 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     setState(() => _activeVoucher = '');
     ref.read(penjualanProvider.notifier).setReturSource('');
-
     _memberController.clear();
     _nominalController.clear();
     _skuController.clear();
   }
 
-  Future<void> _printInvoice({
+  // ============================================================
+  // PRINT
+  // ============================================================
+  //
+  // _handlePrint — entry point tunggal untuk semua print.
+  //
+  // [isKitchenMode] = true  → print 2x (customer + kitchen), untuk FnB.
+  //                  false → print 1x (customer only), untuk retail.
+  //
+  // Dipanggil dari:
+  //   • Dialog sukses bayar — tombol "Print" (retail) atau "Print (2x)" (FnB)
+  //   • Tombol "Print Kitchen" di dialog sukses bayar
+  //   • Invoice list screen (reprint)
+  Future<void> _handlePrint({
     required String invoiceNumber,
     required double kembalian,
     required String caraBayar,
     required PenjualanState currentState,
+    bool isKitchenMode = false,
   }) async {
     try {
-      final isConnected = await PrinterHelper.isConnected();
-      if (!isConnected) {
-        // Coba connect ke printer tersimpan
+      // ── Pastikan printer terhubung ───────────────────────────
+      final connected = await PrinterHelper.isConnected();
+      if (!connected) {
         final prefs = await SharedPreferences.getInstance();
         final savedMac = prefs.getString('printer_mac');
         if (savedMac == null) {
@@ -1271,80 +1495,169 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
 
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
+      final dio   = ApiService.getDio(token: _token);
 
-      // Ambil data store
+      // ── Ambil data store ─────────────────────────────────────
       final storeRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'getStoreData',
             'store_id': state.storeID,
           }));
 
-      final storeName = storeRes.data['nama'] ?? '';
-      final storeAddress = storeRes.data['alamat'] ?? '';
-      final storeNpwp = storeRes.data['npwp'] ?? '';
-      final invoiceNote = storeRes.data['invoice_note'] ?? '';
+      final storeName    = storeRes.data['nama']         ?? '';
+      final storeAddress = storeRes.data['alamat']        ?? '';
+      final storeNpwp    = storeRes.data['npwp']          ?? '';
+      final invoiceNote  = storeRes.data['invoice_note']  ?? '';
+      final storeTax     = (storeRes.data['tax'] as num? ?? 0).toDouble();
+      // isFnb: dibaca dari state yang sudah di-set saat load awal
+      // (jasa_perusahaan == 3 di dim_organisasi → FnB/resto)
+      final isFnb = _isFnb;
 
-      // Ambil items dari currentState (bukan state yang sudah reset)
+      // ── Siapkan items ────────────────────────────────────────
       final items = currentState.items
           .map((item) => {
-                'nama': item.nama,
-                'qty': item.qty,
-                'hpj': item.hpj,
-                'subtotal': item.subtotal,
-                'diskon_persen': item.diskonPersen,
-                'diskon_nominal': item.diskonNominal,
+                'nama'           : item.nama,
+                'qty'            : item.qty,
+                'hpj'            : item.hpj,
+                'subtotal'       : item.subtotal,
+                'diskon_persen'  : item.diskonPersen,
+                'diskon_nominal' : item.diskonNominal,
+                'packages_notes' : item.packagesNotes ?? '',
               })
           .toList();
 
-      await PrinterHelper.printInvoice(
-        storeName: storeName,
-        storeAddress: storeAddress,
-        npwp: storeNpwp,
-        invoiceNote: invoiceNote,
-        invoiceNumber: invoiceNumber,
-        tanggal: DateTime.now().toString().substring(0, 16),
-        kasir: (await SessionService.getSession())['nama'] ?? '',
-        memberNama: currentState.memberNama,
-        items: items,
-        gross: currentState.gross,
-        diskon: currentState.diskon,
-        total: currentState.total,
-        dpp: currentState.dpp,
-        pajak: currentState.pajak,
-        caraBayar: caraBayar,
-        nominalBayar: currentState.nominalBayar,
-        kembalian: kembalian,
-        voucherKode: _activeVoucher.isNotEmpty ? _activeVoucher : null,
-      );
+      // ── Ambil nama channel ───────────────────────────────────
+      final salesTipeNama = _channels
+          .firstWhere(
+            (c) =>
+                int.parse(c['dim_salestipe_id'].toString()) ==
+                currentState.salesTipeID,
+            orElse: () => {'nama': ''},
+          )['nama']
+          ?.toString() ??
+          '';
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Print berhasil!'),
-            backgroundColor: Colors.green,
-          ),
+      final kasirNama =
+          (await SessionService.getSession())['nama'] as String? ?? '';
+      final tanggal = DateTime.now().toString().substring(0, 16);
+
+      // ── Print berdasarkan mode ───────────────────────────────
+      if (isFnb || isKitchenMode) {
+        // FnB: print customer struk + kitchen order sekaligus
+        final result = await PrinterHelper.printBoth(
+          storeName    : storeName,
+          storeAddress : storeAddress,
+          invoiceNumber: invoiceNumber,
+          tanggal      : tanggal,
+          kasir        : kasirNama,
+          memberNama   : currentState.memberNama,
+          items        : items,
+          gross        : currentState.gross,
+          diskon       : currentState.diskon,
+          total        : currentState.total,
+          dpp          : currentState.dpp,
+          pajak        : currentState.pajak,
+          caraBayar    : caraBayar,
+          nominalBayar : currentState.nominalBayar,
+          kembalian    : kembalian,
+          storeTax     : storeTax,
+          voucherKode  : _activeVoucher.isNotEmpty ? _activeVoucher : null,
+          npwp         : storeNpwp,
+          invoiceNote  : invoiceNote,
+          salesTipe    : salesTipeNama.isNotEmpty ? salesTipeNama : null,
         );
+
+        if (mounted) {
+          if (result.customer && result.kitchen) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Print berhasil! (Customer + Kitchen)'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else if (result.customer && !result.kitchen) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Struk customer OK, kitchen print gagal. Coba ulangi.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Print gagal'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } else {
+        // Retail: print customer struk saja
+        await PrinterHelper.printInvoice(
+          storeName    : storeName,
+          storeAddress : storeAddress,
+          npwp         : storeNpwp,
+          invoiceNote  : invoiceNote,
+          invoiceNumber: invoiceNumber,
+          tanggal      : tanggal,
+          kasir        : kasirNama,
+          memberNama   : currentState.memberNama,
+          items        : items,
+          gross        : currentState.gross,
+          diskon       : currentState.diskon,
+          total        : currentState.total,
+          dpp          : currentState.dpp,
+          pajak        : currentState.pajak,
+          caraBayar    : caraBayar,
+          nominalBayar : currentState.nominalBayar,
+          kembalian    : kembalian,
+          voucherKode  : _activeVoucher.isNotEmpty ? _activeVoucher : null,
+          storeTax     : storeTax,
+          salesTipe    : salesTipeNama.isNotEmpty ? salesTipeNama : null,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Print berhasil!'),
+                backgroundColor: Colors.green),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal print: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Gagal print: $e')));
       }
     }
   }
 
+  // ── Legacy alias — dipakai oleh invoice_list_screen reprint ──
+  Future<void> _printInvoice({
+    required String invoiceNumber,
+    required double kembalian,
+    required String caraBayar,
+    required PenjualanState currentState,
+  }) =>
+      _handlePrint(
+        invoiceNumber: invoiceNumber,
+        kembalian    : kembalian,
+        caraBayar    : caraBayar,
+        currentState : currentState,
+      );
+
+  // ============================================================
+  // PENDING PAYMENT
+  // ============================================================
   Future<void> _showPendingDialog() async {
     final state = ref.read(penjualanProvider);
 
     if (state.items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Belum ada produk')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Belum ada produk')));
       return;
     }
-
     if (state.memberID == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1368,9 +1681,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -1387,14 +1699,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'simpanPending',
-          'number':        state.number,
-          'store_id':      state.storeID,
+          'action': 'simpanPending',
+          'number': state.number,
+          'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
-          'member_id':     state.memberID ?? 0,
-          'user_id':       session['user_id'],
-          'label':         labelController.text.trim(),
-          'device_token':  _deviceToken,
+          'member_id': state.memberID ?? 0,
+          'user_id': session['user_id'],
+          'label': labelController.text.trim(),
+          'device_token': _deviceToken,
         }));
 
     if (res.data['success'] == true) {
@@ -1417,6 +1729,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     }
   }
 
+  // ============================================================
+  // RETRIEVE ORDER
+  // ============================================================
   Future<void> _showRetrieveDialog() async {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
@@ -1428,7 +1743,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         }));
 
     final orders = List<Map<String, dynamic>>.from(res.data['data']);
-
     if (orders.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1437,7 +1751,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
       return;
     }
-
     if (!mounted) return;
 
     showModalBottomSheet(
@@ -1479,7 +1792,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Retrieve
                           IconButton(
                             icon: const Icon(Icons.play_circle,
                                 color: Colors.green),
@@ -1491,7 +1803,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                               );
                             },
                           ),
-                          // Delete
                           IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
                             onPressed: () async {
@@ -1503,10 +1814,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                                       'Order ${order['label'] ?? order['kode']} akan dihapus.'),
                                   actions: [
                                     TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, false),
-                                      child: const Text('Batal'),
-                                    ),
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: const Text('Batal')),
                                     ElevatedButton(
                                       onPressed: () =>
                                           Navigator.pop(context, true),
@@ -1546,10 +1856,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':         'retrievePending',
+          'action': 'retrievePending',
           'sales_order_id': salesOrderID,
-          'number':         state.number,
-          'device_token':   _deviceToken,
+          'number': state.number,
+          'device_token': _deviceToken,
         }));
 
     if (res.data['success'] == true) {
@@ -1579,6 +1889,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         }));
   }
 
+  // ============================================================
+  // BUILD
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -1630,28 +1943,47 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       ),
       body: Row(
         children: [
-          // KOLOM KIRI (60%)
+          // ── KOLOM KIRI (60%) — identitas + product image grid ──
           Expanded(
             flex: 6,
             child: Column(
               children: [
                 _buildHeader(state),
-                Expanded(child: _buildCart(state)),
+                Expanded(
+                  child: _buildImageGrid(),
+                ),
               ],
             ),
           ),
-          // DIVIDER
           Container(width: 1, color: Colors.grey.shade300),
-          // KOLOM KANAN (40%)
+          // ── KOLOM KANAN (40%) — cart list + summary ────────────
           SizedBox(
             width: MediaQuery.of(context).size.width * 0.38,
-            child: _buildSummary(state),
+            child: Column(
+              children: [
+                // Cart list (expandable)
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _checkShiftStillActive,
+                    color: const Color(0xFF1D273B),
+                    child: _buildCart(state),
+                  ),
+                ),
+                // Divider
+                Container(height: 1, color: Colors.grey.shade300),
+                // Summary + cara bayar + tombol
+                _buildSummary(state),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
+  // ============================================================
+  // HEADER (store info, channel, member, sku search)
+  // ============================================================
   Widget _buildHeader(PenjualanState state) {
     return Container(
       color: Colors.white,
@@ -1684,6 +2016,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ],
           ),
           const SizedBox(height: 8),
+
           // Row 2: Channel
           DropdownButtonFormField<int>(
             initialValue: state.salesTipeID,
@@ -1706,7 +2039,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             },
           ),
           const SizedBox(height: 8),
-          // Row 3: Member + Voucher + Retur
+
+          // Row 3: Member (search + add baru) + Voucher + Retur
           Row(
             children: [
               Expanded(
@@ -1718,9 +2052,12 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     isDense: true,
-                    suffixIcon: state.memberID != null
+                    // ── Ikon di kiri: add member / clear ──────────
+                    prefixIcon: state.memberID != null
                         ? IconButton(
-                            icon: const Icon(Icons.close, size: 18),
+                            icon: const Icon(Icons.close,
+                                size: 18, color: Colors.red),
+                            tooltip: 'Hapus member',
                             onPressed: () {
                               _memberController.clear();
                               ref
@@ -1728,7 +2065,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                                   .setMember(null, '');
                             },
                           )
-                        : const Icon(Icons.search, size: 18),
+                        : IconButton(
+                            icon: const Icon(Icons.person_add,
+                                size: 18, color: Color(0xFF1D273B)),
+                            tooltip: 'Tambah member baru',
+                            onPressed: _showAddMemberSheet,
+                          ),
+                    // ── Ikon search di kanan ─────────────────────
+                    suffixIcon: const Icon(Icons.search, size: 18),
                   ),
                   onSubmitted: (val) async {
                     if (val.isEmpty) return;
@@ -1758,6 +2102,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                           itemBuilder: (_, i) {
                             final m = data[i];
                             return ListTile(
+                              leading: const Icon(Icons.person),
                               title: Text(m['nama']),
                               subtitle: Text(m['telp']),
                               onTap: () {
@@ -1778,18 +2123,42 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () => _showVoucherDialog(),
-                icon: const Icon(Icons.confirmation_number_outlined, size: 18),
-                label: const Text('Voucher'),
-                style: OutlinedButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
+              // Voucher badge jika aktif
+              Stack(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _showVoucherDialog,
+                    icon: const Icon(Icons.confirmation_number_outlined,
+                        size: 18),
+                    label: const Text('Voucher'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      foregroundColor:
+                          _activeVoucher.isNotEmpty ? Colors.indigo : null,
+                      side: _activeVoucher.isNotEmpty
+                          ? const BorderSide(color: Colors.indigo)
+                          : null,
+                    ),
+                  ),
+                  if (_activeVoucher.isNotEmpty)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.indigo,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: () => _showReturDialog(),
+                onPressed: _showReturDialog,
                 icon: const Icon(Icons.assignment_return_outlined, size: 18),
                 label: const Text('Retur'),
                 style: OutlinedButton.styleFrom(
@@ -1802,6 +2171,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ],
           ),
           const SizedBox(height: 8),
+
           // Row 4: SKU Search
           TextField(
             controller: _skuController,
@@ -1823,10 +2193,120 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     );
   }
 
+  // ============================================================
+  // PRODUCT IMAGE GRID (kiri bawah)
+  // ============================================================
+  Widget _buildImageGrid() {
+    if (_isLoadingImages) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_imageProducts.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.image_not_supported_outlined,
+                size: 48, color: Colors.grey.shade400),
+            const SizedBox(height: 8),
+            Text('Tidak ada produk dengan gambar',
+                style: TextStyle(color: Colors.grey.shade500)),
+          ],
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(10),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 0.72,
+      ),
+      itemCount: _imageProducts.length,
+      itemBuilder: (_, i) {
+        final p = _imageProducts[i];
+        final imageUrl = p['image']?.toString() ?? '';
+        final nama = p['nama']?.toString() ?? '';
+        final kode = p['kode']?.toString() ?? '';
+        final hpj = (p['hpj'] as num? ?? 0).toDouble();
+
+        return GestureDetector(
+          onTap: () => _insertProduk(kode),
+          child: Card(
+            elevation: 2,
+            clipBehavior: Clip.antiAlias,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: Colors.grey.shade200,
+                      child: const Icon(Icons.broken_image,
+                          color: Colors.grey, size: 32),
+                    ),
+                    loadingBuilder: (_, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        color: Colors.grey.shade100,
+                        child: const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                      );
+                    },
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+                  color: Colors.white,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        nama,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Rp ${CurrencyFormat.format(hpj)}',
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF1D273B),
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ============================================================
+  // CART LIST
+  // ============================================================
   Widget _buildCart(PenjualanState state) {
     if (state.items.isEmpty) {
-      return const Center(
-        child: Text('Belum ada produk', style: TextStyle(color: Colors.grey)),
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 80),
+          Center(
+            child:
+                Text('Belum ada produk', style: TextStyle(color: Colors.grey)),
+          ),
+        ],
       );
     }
 
@@ -1835,6 +2315,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       itemCount: state.items.length,
       itemBuilder: (_, i) {
         final item = state.items[i];
+        // Tampilkan badge "Package" jika ada packagesNotes
+        final isPackage =
+            item.packagesNotes != null && item.packagesNotes!.isNotEmpty;
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(8),
@@ -1844,8 +2327,29 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(item.nama,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(item.nama,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                          if (isPackage)
+                            Container(
+                              margin: const EdgeInsets.only(left: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.blue.shade200),
+                              ),
+                              child: const Text('Package',
+                                  style: TextStyle(
+                                      fontSize: 10, color: Colors.blue)),
+                            ),
+                        ],
+                      ),
                       Text(item.kode,
                           style: const TextStyle(
                               fontSize: 12, color: Colors.grey)),
@@ -1869,7 +2373,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     ),
                   ],
                 ),
-                // Subtotal
+                // Subtotal + delete
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -1890,6 +2394,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     );
   }
 
+  // ============================================================
+  // SUMMARY PANEL (kanan)
+  // ============================================================
   Widget _buildSummary(PenjualanState state) {
     return Container(
       color: Colors.white,
@@ -1900,55 +2407,37 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           const Text('Total Pembelian',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const Divider(),
-          // Gross
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Gross'),
-              Text('Rp ${CurrencyFormat.format(state.gross)}'),
-            ],
-          ),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('Gross'),
+            Text('Rp ${CurrencyFormat.format(state.gross)}'),
+          ]),
           const SizedBox(height: 4),
-          // Diskon
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Diskon'),
-              Text('Rp ${CurrencyFormat.format(state.diskon)}'),
-            ],
-          ),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('Diskon'),
+            Text('Rp ${CurrencyFormat.format(state.diskon)}'),
+          ]),
           const Divider(),
-          // Total
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('TOTAL',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              Text('Rp ${CurrencyFormat.format(state.total)}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16)),
-            ],
-          ),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('TOTAL',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text('Rp ${CurrencyFormat.format(state.total)}',
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ]),
           const Divider(),
-          // DPP & Pajak
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('DPP', style: TextStyle(color: Colors.grey)),
-              Text('Rp ${CurrencyFormat.format(state.dpp)}',
-                  style: const TextStyle(color: Colors.grey)),
-            ],
-          ),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('DPP', style: TextStyle(color: Colors.grey)),
+            Text('Rp ${CurrencyFormat.format(state.dpp)}',
+                style: const TextStyle(color: Colors.grey)),
+          ]),
           const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Pajak', style: TextStyle(color: Colors.grey)),
-              Text('Rp ${CurrencyFormat.format(state.pajak)}',
-                  style: const TextStyle(color: Colors.grey)),
-            ],
-          ),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('Pajak', style: TextStyle(color: Colors.grey)),
+            Text('Rp ${CurrencyFormat.format(state.pajak)}',
+                style: const TextStyle(color: Colors.grey)),
+          ]),
           const Divider(),
+
           // Cara Bayar
           DropdownButtonFormField<int>(
             initialValue: state.caraBayarID == 0 ? null : state.caraBayarID,
@@ -1976,6 +2465,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             },
           ),
           const SizedBox(height: 8),
+
           // Nominal Bayar
           TextField(
             controller: _nominalController,
@@ -1992,8 +2482,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               ref.read(penjualanProvider.notifier).setNominalBayar(nominal);
             },
           ),
-          const Spacer(),
-          // PENDING dulu
+          const SizedBox(height: 12),
+
+          // PENDING
           SizedBox(
             width: double.infinity,
             height: 48,
@@ -2010,7 +2501,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          // BAYAR paling bawah
+
+          // BAYAR
           SizedBox(
             width: double.infinity,
             height: 48,
