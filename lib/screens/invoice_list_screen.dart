@@ -24,6 +24,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   String _activeStoreAddress = '';
   String _activeStoreNpwp    = '';
   String _activeInvoiceNote  = '';
+  String _logoFileName       = '';
+  String _logoUrl            = '';
   int    _waEnabled          = 0;
   bool   _isFnB        = false;  // true jika jasa_perusahaan == 3
   bool   _isMultiStore = false;
@@ -83,14 +85,17 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       }
 
       // Load setting store aktif (untuk print/WA/email)
+      // Pakai getStoreData agar logo_file_name + logo_url ikut di-return
       final settingRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':   'getStoreSetting',
+            'action':   'getStoreData',
             'store_id': _activeStoreID,
           }));
       _activeStoreAddress = settingRes.data['alamat'] ?? '';
       _activeStoreNpwp    = settingRes.data['npwp'] ?? '';
       _activeInvoiceNote  = settingRes.data['invoice_note'] ?? '';
+      _logoFileName       = settingRes.data['logo_file_name'] ?? '';
+      _logoUrl            = settingRes.data['logo_url'] ?? '';
       _waEnabled          = settingRes.data['wa'] ?? 0;
 
       await _loadInvoices();
@@ -185,15 +190,18 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     return 1; // fallback: anggap first print agar tidak crash
   }
 
-  // ── Ambil items dari API ─────────────────────────────────────
-  Future<List<Map<String, dynamic>>> _fetchItems(int invoiceId) async {
+  // ── Ambil items + keterangan transaksi dari API ─────────────
+  Future<Map<String, dynamic>> _fetchItems(int invoiceId) async {
     final dio = ApiService.getDio(token: _token);
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
           'action':     'getInvoiceDetail',
           'invoice_id': invoiceId,
         }));
-    return List<Map<String, dynamic>>.from(res.data['data']);
+    return {
+      'items':      List<Map<String, dynamic>>.from(res.data['data']),
+      'keterangan': res.data['keterangan'] ?? '',
+    };
   }
 
   // ── ENTRY POINT print dari list ──────────────────────────────
@@ -304,8 +312,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
         _fetchItems(invoice['id'] as int),
         _trackPrint(invoice['kode']),
       ]);
-      final items     = results[0] as List<Map<String, dynamic>>;
-      final copyCount = results[1] as int;
+      final fetchResult = results[0] as Map<String, dynamic>;
+      final items        = fetchResult['items'] as List<Map<String, dynamic>>;
+      final keteranganTrx = fetchResult['keterangan'] as String;
+      final copyCount    = results[1] as int;
 
       // 3. Siapkan data bersama
       final tanggal = invoice['tanggal'].toString().length >= 16
@@ -333,7 +343,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           nominalBayar: (invoice['bayar'] as num).toDouble(),
           kembalian:    (invoice['kembalian'] as num).toDouble(),
           voucherKode:  invoice['voucher_kode'],
-          copyCount:    copyCount, // ribbon COPY N jika >= 2
+          keterangan:   keteranganTrx,
+          logoFileName: _logoFileName.isNotEmpty ? _logoFileName : null,
+          logoUrl:      _logoUrl.isNotEmpty ? _logoUrl : null,
+          copyCount:    copyCount,
         );
       }
 
@@ -351,7 +364,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           kasir:         invoice['kasir'] ?? '',
           items:         items,
           total:         (invoice['total'] as num).toDouble(),
-          copyCount:     copyCount, // ribbon COPY N jika >= 2
+          keterangan:    keteranganTrx,
+          copyCount:     copyCount,
         );
       }
 
@@ -465,6 +479,105 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(res.data['message'] ?? 'Gagal kirim email')),
+        );
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
+  Future<void> _requestVoid(Map<String, dynamic> invoice) async {
+    final TextEditingController notesCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Request Void', style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Invoice: ${invoice['kode']}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            const Text('Masukkan alasan void:', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: notesCtrl,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'Contoh: transaksi dobel, salah input, dll.',
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              if (notesCtrl.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Kirim Request',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    final notes = notesCtrl.text.trim();
+    if (notes.isEmpty) return;
+
+    final dio = ApiService.getDio(token: _token);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final res = await dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'voidInvoice',
+            'id':     invoice['id'],
+            'notes':  notes,
+            'userID': _userID,
+          }));
+
+      if (mounted) Navigator.pop(context);
+
+      if (res.data['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Request void berhasil dikirim!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        await _loadInvoices(); // refresh list — invoice REQ VO tidak muncul lagi
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content:
+                  Text(res.data['message'] ?? 'Gagal kirim request void')),
         );
       }
     } catch (e) {
@@ -645,6 +758,15 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                               onPressed: () =>
                                                   _sendEmail(inv),
                                             ),
+                                          // Request Void
+                                          IconButton(
+                                            icon: const Icon(
+                                                Icons.cancel_outlined,
+                                                color: Colors.red),
+                                            tooltip: 'Request Void',
+                                            onPressed: () =>
+                                                _requestVoid(inv),
+                                          ),
                                         ],
                                       ),
                                     ],

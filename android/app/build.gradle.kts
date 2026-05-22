@@ -17,7 +17,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.example.mobile_pos"
+    namespace = "com.aibipi.pos"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -31,7 +31,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.mobile_pos"
+        applicationId = "com.aibipi.pos"
 
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion

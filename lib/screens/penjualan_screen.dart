@@ -29,7 +29,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   final _skuController = TextEditingController();
   final _memberController = TextEditingController();
   final _nominalController = TextEditingController();
+  final _keteranganController = TextEditingController(); // keterangan transaksi
   String _activeVoucher = '';
+
+  // Untuk inline notes per item: key = item index, value = controller
+  final Map<int, TextEditingController> _itemNotesControllers = {};
+  // Set of item indices yang sedang expanded (menampilkan input notes)
+  final Set<int> _expandedNotes = {};
 
   String _token = '';
   int _userID = 0;
@@ -42,13 +48,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   int _activeStoreID = 0;
   int _activeOrgID = 0;
   String _activeStoreName = '';
-  bool _isFnb = false;   // true jika jasa_perusahaan == 3 (FnB/resto)
+  bool _isFnb = false; // true jika jasa_perusahaan == 3 (FnB/resto)
 
   List<Map<String, dynamic>> _channels = [];
   List<Map<String, dynamic>> _caraBayarList = [];
 
-  // ── Product image grid ────────────────────────────────────────
-  List<Map<String, dynamic>> _imageProducts = [];
+  // ── Product image grid — dikelompokkan per kategori (jenis produk) ──
+  // Struktur: [ { 'id': int, 'nama': String, 'produk': [ {kode,nama,hpj,image} ] } ]
+  List<Map<String, dynamic>> _imageCategories = [];
   bool _isLoadingImages = false;
 
   @override
@@ -64,6 +71,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     _skuController.dispose();
     _memberController.dispose();
     _nominalController.dispose();
+    _keteranganController.dispose();
+    for (final c in _itemNotesControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -275,7 +286,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       setState(() => _isLoading = false);
       _loadImageProducts();
     } catch (e, st) {
-      debugPrint('ERROR: $e\n$st');
       setState(() => _isLoading = false);
     }
   }
@@ -667,40 +677,76 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
   // ============================================================
   // INSERT PRODUK — wrap: cek package dulu
+  // Pakai ResponseType.plain agar tidak crash jika PHP ada output
+  // warning/notice sebelum JSON — bersihkan string lalu parse.
   // ============================================================
   Future<void> _insertProduk(String sku) async {
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
+    final dio   = ApiService.getDio(token: _token);
 
-    // Cek apakah produk ini package
-    final cekRes = await dio.post('/penjualan.php',
+    Map<String, dynamic> cekData;
+    try {
+      final rawRes = await dio.post(
+        '/penjualan.php',
         data: FormData.fromMap({
-          'action': 'cekPackage',
-          'sku': sku,
+          'action':       'cekPackage',
+          'sku':          sku,
           'organisasi_id': state.organisasiID,
-        }));
+        }),
+        options: Options(responseType: ResponseType.plain),
+      );
 
-    if (cekRes.data['is_package'] == true) {
-      // ── Produk package → tampilkan dialog pilihan isian + addon ──
+      final rawStr = rawRes.data?.toString() ?? '';
+
+      // Buang karakter sebelum '{'  (PHP notice / BOM / whitespace)
+      final jsonStart = rawStr.indexOf('{');
+      if (jsonStart < 0) {
+        // Response tidak valid — fallback insert biasa
+        debugPrint('[cekPackage] Response tidak valid (no JSON): $rawStr');
+        await _doInsertProduk(sku);
+        return;
+      }
+      final cleanStr = rawStr.substring(jsonStart);
+      final decoded = jsonDecode(cleanStr);
+      if (decoded is! Map) {
+        debugPrint('[cekPackage] JSON bukan Map: $cleanStr');
+        await _doInsertProduk(sku);
+        return;
+      }
+      cekData = Map<String, dynamic>.from(decoded);
+    } on DioException catch (e) {
+      debugPrint('[cekPackage] DioException: ${e.message}');
+      await _doInsertProduk(sku);
+      return;
+    } catch (e) {
+      debugPrint('[cekPackage] Exception: $e');
+      await _doInsertProduk(sku);
+      return;
+    }
+
+    // is_package dari PHP bisa berupa bool true atau int 1 (TINYINT MySQL)
+    final isPackage = cekData['is_package'] == true || cekData['is_package'] == 1;
+
+    if (isPackage) {
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (_) => PackageDialog(
           sku: sku,
-          packageData: Map<String, dynamic>.from(cekRes.data),
-          onConfirm: (isianDipilih, addonDipilih, addonTotal) {
+          packageData: cekData,
+          onConfirm: (isianDipilih, addonDipilih, addonTotal, keterangan) {
             _doInsertPackage(
               sku: sku,
               isianDipilih: isianDipilih,
               addonDipilih: addonDipilih,
               addonTotal: addonTotal,
+              keterangan: keterangan,
             );
           },
         ),
       );
     } else {
-      // ── Produk biasa → insert langsung ────────────────────────
       await _doInsertProduk(sku);
     }
   }
@@ -744,6 +790,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     required List<Map<String, dynamic>> isianDipilih,
     required List<Map<String, dynamic>> addonDipilih,
     required double addonTotal,
+    String keterangan = '',
   }) async {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
@@ -761,6 +808,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'isian': jsonEncode(isianDipilih),
           'addon': jsonEncode(addonDipilih),
           'addon_harga': addonTotal,
+          'keterangan': keterangan,
         }));
 
     if (res.data['success'] == true) {
@@ -834,28 +882,55 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   // ============================================================
-  // LOAD PRODUK DENGAN IMAGE untuk grid kiri
+  // LOAD PRODUK DENGAN IMAGE untuk grid kiri — per kategori
   // ============================================================
   Future<void> _loadImageProducts() async {
     if (_isLoadingImages) return;
     setState(() => _isLoadingImages = true);
     try {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getImageProducts',
-            'organisasi_id': state.organisasiID,
-          }));
-      final raw = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
-      // Filter client-side: hanya produk yang image-nya tidak null/kosong
-      final filtered = raw.where((p) {
-        final img = p['image']?.toString() ?? '';
-        return img.isNotEmpty;
-      }).toList();
-      if (mounted) setState(() => _imageProducts = filtered);
-    } catch (_) {
-      // Diam saja jika gagal
+      final dio   = ApiService.getDio(token: _token);
+
+      final rawRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action':       'getImageProducts',
+          'organisasi_id': state.organisasiID,
+        }),
+        options: Options(responseType: ResponseType.plain),
+      );
+
+      final rawStr = rawRes.data?.toString() ?? '';
+
+      final jsonStart = rawStr.indexOf('{');
+      if (jsonStart < 0) {
+        return;
+      }
+      final parsed = jsonDecode(rawStr.substring(jsonStart)) as Map;
+
+      // Backend baru return list of { id, nama, produk: [...] }
+      final rawData = parsed['data'];
+      if (rawData is List) {
+        final categories = rawData
+            .map<Map<String, dynamic>>((cat) => {
+                  'id': cat['id'] ?? 0,
+                  'nama': cat['nama']?.toString() ?? '',
+                  'produk': (cat['produk'] as List? ?? [])
+                      .map<Map<String, dynamic>>((p) => {
+                            'kode': p['kode']?.toString() ?? '',
+                            'nama': p['nama']?.toString() ?? '',
+                            'hpj': (p['hpj'] as num? ?? 0).toDouble(),
+                            'image': p['image']?.toString() ?? '',
+                            'is_package': p['is_package'] == true || p['is_package'] == 1,
+                          })
+                      .where((p) => p['image']!.isNotEmpty)
+                      .toList(),
+                })
+            .where((cat) => (cat['produk'] as List).isNotEmpty)
+            .toList();
+        if (mounted) setState(() => _imageCategories = categories);
+      }
+    } catch (e) {
     } finally {
       if (mounted) setState(() => _isLoadingImages = false);
     }
@@ -928,6 +1003,29 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'device_token': _deviceToken,
         }));
 
+    await _refreshFromApi();
+  }
+
+  Future<void> _updateItemKeterangan(int index, String keterangan) async {
+    final state = ref.read(penjualanProvider);
+    final dio = ApiService.getDio(token: _token);
+    final item = state.items[index];
+
+    await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'updateItemKeterangan',
+          'number': state.number,
+          'sku': item.kode,
+          'packages_notes': item.packagesNotes ?? '',
+          'keterangan': keterangan,
+          'device_token': _deviceToken,
+        }));
+
+    // Dispose controller lama agar re-init dengan teks terbaru setelah refresh
+    _itemNotesControllers[index]?.dispose();
+    _itemNotesControllers.remove(index);
+
+    // Refresh state agar keterangan tampil di bawah item
     await _refreshFromApi();
   }
 
@@ -1293,6 +1391,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'retur_source': ref.read(penjualanProvider).returSource,
           'nominal_bayar': state.nominalBayar,
           'device_token': _deviceToken,
+          'keterangan': _keteranganController.text.trim(),
         }));
 
     if (mounted) Navigator.pop(context); // tutup loading
@@ -1325,44 +1424,57 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               ],
             ),
             actions: [
-              // ── Print customer + kitchen (FnB) ──────────────
-              TextButton.icon(
-                onPressed: () async {
-                  await _handlePrint(
-                    invoiceNumber: state.number,
-                    kembalian    : (kembalian as num).toDouble(),
-                    caraBayar    : _caraBayarList.firstWhere(
-                      (c) =>
-                          int.parse(c['dim_carabayar_id'].toString()) ==
-                          state.caraBayarID,
-                      orElse: () => {'nama': ''},
-                    )['nama'],
-                    currentState : state,
-                    isKitchenMode: true,
-                  );
-                },
-                icon: const Icon(Icons.print, size: 18),
-                label: const Text('Print (2x)'),
-              ),
-              // ── Print customer only (retail) ─────────────────
-              TextButton.icon(
-                onPressed: () async {
-                  await _handlePrint(
-                    invoiceNumber: state.number,
-                    kembalian    : (kembalian as num).toDouble(),
-                    caraBayar    : _caraBayarList.firstWhere(
-                      (c) =>
-                          int.parse(c['dim_carabayar_id'].toString()) ==
-                          state.caraBayarID,
-                      orElse: () => {'nama': ''},
-                    )['nama'],
-                    currentState : state,
-                    isKitchenMode: false,
-                  );
-                },
-                icon: const Icon(Icons.receipt_long, size: 18),
-                label: const Text('Print'),
-              ),
+              // ── Tombol Print — adaptif FnB vs non-FnB ───────
+              if (_isFnb)
+                // FnB: satu tombol → buka bottom sheet pilih
+                // Customer / Kitchen / Keduanya
+                TextButton.icon(
+                  onPressed: () async {
+                    final caraBayar = _caraBayarList.firstWhere(
+                          (c) =>
+                              int.parse(c['dim_carabayar_id'].toString()) ==
+                              state.caraBayarID,
+                          orElse: () => {'nama': ''},
+                        )['nama'] as String? ??
+                        '';
+                    Navigator.pop(context); // tutup dialog sukses dulu
+                    await _showPrintSheet(
+                      invoiceNumber: state.number,
+                      kembalian: (kembalian as num).toDouble(),
+                      caraBayar: caraBayar,
+                      currentState: state,
+                    );
+                    _resetTransaksi();
+                  },
+                  icon: const Icon(Icons.print, size: 18),
+                  label: const Text('Print'),
+                )
+              else
+                // Non-FnB (retail): langsung print customer copy
+                TextButton.icon(
+                  onPressed: () async {
+                    final caraBayar = _caraBayarList.firstWhere(
+                          (c) =>
+                              int.parse(c['dim_carabayar_id'].toString()) ==
+                              state.caraBayarID,
+                          orElse: () => {'nama': ''},
+                        )['nama'] as String? ??
+                        '';
+                    await _handlePrint(
+                      invoiceNumber: state.number,
+                      kembalian: (kembalian as num).toDouble(),
+                      caraBayar: caraBayar,
+                      currentState: state,
+                      isKitchenMode: false,
+                    );
+                    if (mounted) {
+                      Navigator.pop(context);
+                      _resetTransaksi();
+                    }
+                  },
+                  icon: const Icon(Icons.receipt_long, size: 18),
+                  label: const Text('Print'),
+                ),
               ElevatedButton(
                 onPressed: () {
                   Navigator.pop(context);
@@ -1404,8 +1516,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               'organisasi_id': organisasiID,
               'member_id': memberID,
             }))
-        .then((r) => debugPrint('WA: ${r.data}'))
-        .catchError((e) => debugPrint('WA error: $e'));
+        .then((_) {}).catchError((_) {});
 
     dio
         .post('/penjualan.php',
@@ -1416,8 +1527,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               'organisasi_id': organisasiID,
               'member_id': memberID,
             }))
-        .then((r) => debugPrint('Email: ${r.data}'))
-        .catchError((e) => debugPrint('Email error: $e'));
+        .then((_) {}).catchError((_) {});
   }
 
   Future<void> _resetTransaksi() async {
@@ -1451,6 +1561,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     _memberController.clear();
     _nominalController.clear();
     _skuController.clear();
+    _keteranganController.clear();
+    // Reset item notes
+    for (final c in _itemNotesControllers.values) {
+      c.dispose();
+    }
+    _itemNotesControllers.clear();
+    _expandedNotes.clear();
   }
 
   // ============================================================
@@ -1495,7 +1612,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
 
       final state = ref.read(penjualanProvider);
-      final dio   = ApiService.getDio(token: _token);
+      final dio = ApiService.getDio(token: _token);
 
       // ── Ambil data store ─────────────────────────────────────
       final storeRes = await dio.post('/penjualan.php',
@@ -1504,11 +1621,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             'store_id': state.storeID,
           }));
 
-      final storeName    = storeRes.data['nama']         ?? '';
-      final storeAddress = storeRes.data['alamat']        ?? '';
-      final storeNpwp    = storeRes.data['npwp']          ?? '';
-      final invoiceNote  = storeRes.data['invoice_note']  ?? '';
-      final storeTax     = (storeRes.data['tax'] as num? ?? 0).toDouble();
+      final storeName = storeRes.data['nama'] ?? '';
+      final storeAddress = storeRes.data['alamat'] ?? '';
+      final storeNpwp = storeRes.data['npwp'] ?? '';
+      final invoiceNote = storeRes.data['invoice_note'] ?? '';
+      final storeTax = (storeRes.data['tax'] as num? ?? 0).toDouble();
       // isFnb: dibaca dari state yang sudah di-set saat load awal
       // (jasa_perusahaan == 3 di dim_organisasi → FnB/resto)
       final isFnb = _isFnb;
@@ -1516,25 +1633,25 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       // ── Siapkan items ────────────────────────────────────────
       final items = currentState.items
           .map((item) => {
-                'nama'           : item.nama,
-                'qty'            : item.qty,
-                'hpj'            : item.hpj,
-                'subtotal'       : item.subtotal,
-                'diskon_persen'  : item.diskonPersen,
-                'diskon_nominal' : item.diskonNominal,
-                'packages_notes' : item.packagesNotes ?? '',
+                'nama': item.nama,
+                'qty': item.qty,
+                'hpj': item.hpj,
+                'subtotal': item.subtotal,
+                'diskon_persen': item.diskonPersen,
+                'diskon_nominal': item.diskonNominal,
+                'packages_notes': item.packagesNotes ?? '',
               })
           .toList();
 
       // ── Ambil nama channel ───────────────────────────────────
       final salesTipeNama = _channels
-          .firstWhere(
-            (c) =>
-                int.parse(c['dim_salestipe_id'].toString()) ==
-                currentState.salesTipeID,
-            orElse: () => {'nama': ''},
-          )['nama']
-          ?.toString() ??
+              .firstWhere(
+                (c) =>
+                    int.parse(c['dim_salestipe_id'].toString()) ==
+                    currentState.salesTipeID,
+                orElse: () => {'nama': ''},
+              )['nama']
+              ?.toString() ??
           '';
 
       final kasirNama =
@@ -1545,26 +1662,26 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       if (isFnb || isKitchenMode) {
         // FnB: print customer struk + kitchen order sekaligus
         final result = await PrinterHelper.printBoth(
-          storeName    : storeName,
-          storeAddress : storeAddress,
+          storeName: storeName,
+          storeAddress: storeAddress,
           invoiceNumber: invoiceNumber,
-          tanggal      : tanggal,
-          kasir        : kasirNama,
-          memberNama   : currentState.memberNama,
-          items        : items,
-          gross        : currentState.gross,
-          diskon       : currentState.diskon,
-          total        : currentState.total,
-          dpp          : currentState.dpp,
-          pajak        : currentState.pajak,
-          caraBayar    : caraBayar,
-          nominalBayar : currentState.nominalBayar,
-          kembalian    : kembalian,
-          storeTax     : storeTax,
-          voucherKode  : _activeVoucher.isNotEmpty ? _activeVoucher : null,
-          npwp         : storeNpwp,
-          invoiceNote  : invoiceNote,
-          salesTipe    : salesTipeNama.isNotEmpty ? salesTipeNama : null,
+          tanggal: tanggal,
+          kasir: kasirNama,
+          memberNama: currentState.memberNama,
+          items: items,
+          gross: currentState.gross,
+          diskon: currentState.diskon,
+          total: currentState.total,
+          dpp: currentState.dpp,
+          pajak: currentState.pajak,
+          caraBayar: caraBayar,
+          nominalBayar: currentState.nominalBayar,
+          kembalian: kembalian,
+          storeTax: storeTax,
+          voucherKode: _activeVoucher.isNotEmpty ? _activeVoucher : null,
+          npwp: storeNpwp,
+          invoiceNote: invoiceNote,
+          salesTipe: salesTipeNama.isNotEmpty ? salesTipeNama : null,
         );
 
         if (mounted) {
@@ -1595,26 +1712,26 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       } else {
         // Retail: print customer struk saja
         await PrinterHelper.printInvoice(
-          storeName    : storeName,
-          storeAddress : storeAddress,
-          npwp         : storeNpwp,
-          invoiceNote  : invoiceNote,
+          storeName: storeName,
+          storeAddress: storeAddress,
+          npwp: storeNpwp,
+          invoiceNote: invoiceNote,
           invoiceNumber: invoiceNumber,
-          tanggal      : tanggal,
-          kasir        : kasirNama,
-          memberNama   : currentState.memberNama,
-          items        : items,
-          gross        : currentState.gross,
-          diskon       : currentState.diskon,
-          total        : currentState.total,
-          dpp          : currentState.dpp,
-          pajak        : currentState.pajak,
-          caraBayar    : caraBayar,
-          nominalBayar : currentState.nominalBayar,
-          kembalian    : kembalian,
-          voucherKode  : _activeVoucher.isNotEmpty ? _activeVoucher : null,
-          storeTax     : storeTax,
-          salesTipe    : salesTipeNama.isNotEmpty ? salesTipeNama : null,
+          tanggal: tanggal,
+          kasir: kasirNama,
+          memberNama: currentState.memberNama,
+          items: items,
+          gross: currentState.gross,
+          diskon: currentState.diskon,
+          total: currentState.total,
+          dpp: currentState.dpp,
+          pajak: currentState.pajak,
+          caraBayar: caraBayar,
+          nominalBayar: currentState.nominalBayar,
+          kembalian: kembalian,
+          voucherKode: _activeVoucher.isNotEmpty ? _activeVoucher : null,
+          storeTax: storeTax,
+          salesTipe: salesTipeNama.isNotEmpty ? salesTipeNama : null,
         );
 
         if (mounted) {
@@ -1642,10 +1759,184 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }) =>
       _handlePrint(
         invoiceNumber: invoiceNumber,
-        kembalian    : kembalian,
-        caraBayar    : caraBayar,
-        currentState : currentState,
+        kembalian: kembalian,
+        caraBayar: caraBayar,
+        currentState: currentState,
       );
+
+  // ============================================================
+  // PRINT SHEET (FnB) — bottom sheet pilih Customer/Kitchen/Keduanya
+  // Dipanggil dari dialog sukses bayar ketika _isFnb == true.
+  // Konsisten dengan _showReprintSheet di invoice_list_screen.
+  // ============================================================
+  Future<void> _showPrintSheet({
+    required String invoiceNumber,
+    required double kembalian,
+    required String caraBayar,
+    required PenjualanState currentState,
+  }) async {
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Handle bar
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Text(
+                  'Pilih Print — $invoiceNumber',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ),
+              const Divider(),
+              // Customer copy
+              ListTile(
+                leading:
+                    const Icon(Icons.receipt_long, color: Color(0xFF1D273B)),
+                title: const Text('Customer Copy'),
+                subtitle: const Text('Struk untuk pelanggan'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _handlePrint(
+                    invoiceNumber: invoiceNumber,
+                    kembalian: kembalian,
+                    caraBayar: caraBayar,
+                    currentState: currentState,
+                    isKitchenMode: false,
+                  );
+                },
+              ),
+              // Kitchen copy
+              ListTile(
+                leading: const Icon(Icons.kitchen, color: Colors.orange),
+                title: const Text('Kitchen Copy'),
+                subtitle: const Text('Struk untuk dapur'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  // isKitchenMode=true tapi kita hanya mau kitchen saja.
+                  // _handlePrint dengan isKitchenMode=true + isFnb=true
+                  // akan masuk ke PrinterHelper.printBoth.
+                  // Untuk print kitchen-only kita panggil helper langsung.
+                  _printKitchenOnly(
+                    invoiceNumber: invoiceNumber,
+                    currentState: currentState,
+                  );
+                },
+              ),
+              // Keduanya
+              ListTile(
+                leading: const Icon(Icons.print_rounded, color: Colors.green),
+                title: const Text('Customer + Kitchen'),
+                subtitle: const Text('Print dua-duanya'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _handlePrint(
+                    invoiceNumber: invoiceNumber,
+                    kembalian: kembalian,
+                    caraBayar: caraBayar,
+                    currentState: currentState,
+                    isKitchenMode: true,
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Print kitchen-only setelah bayar (tanpa struk customer) ──
+  Future<void> _printKitchenOnly({
+    required String invoiceNumber,
+    required PenjualanState currentState,
+  }) async {
+    try {
+      final connected = await PrinterHelper.isConnected();
+      if (!connected) {
+        final prefs = await SharedPreferences.getInstance();
+        final savedMac = prefs.getString('printer_mac');
+        if (savedMac == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Belum ada printer terhubung. Buka pengaturan printer.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+        await PrinterHelper.connect(savedMac);
+      }
+
+      final dio = ApiService.getDio(token: _token);
+      final storeRes = await dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getStoreData',
+            'store_id': currentState.storeID,
+          }));
+      final storeName = storeRes.data['nama'] ?? '';
+
+      final items = currentState.items
+          .map((item) => {
+                'nama': item.nama,
+                'qty': item.qty,
+                'hpj': item.hpj,
+                'subtotal': item.subtotal,
+                'diskon_persen': item.diskonPersen,
+                'diskon_nominal': item.diskonNominal,
+                'packages_notes': item.packagesNotes ?? '',
+              })
+          .toList();
+
+      final kasirNama =
+          (await SessionService.getSession())['nama'] as String? ?? '';
+      final tanggal = DateTime.now().toString().substring(0, 16);
+
+      await PrinterHelper.printKitchen(
+        storeName: storeName,
+        invoiceNumber: invoiceNumber,
+        tanggal: tanggal,
+        kasir: kasirNama,
+        items: items,
+        total: currentState.total,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Print Kitchen berhasil!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Gagal print kitchen: $e')));
+      }
+    }
+  }
 
   // ============================================================
   // PENDING PAYMENT
@@ -1890,6 +2181,42 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   // ============================================================
+  // RESPONSIVE HELPERS
+  // ============================================================
+  // Breakpoint berdasarkan lebar layar (dp):
+  //   ≥ 800  → tablet 8"+ landscape   → layout normal
+  //   720–799 → tablet 8" portrait / 7.5"
+  //   600–719 → tablet 7" landscape
+  //   < 600  → tablet 7" portrait     → stacked layout
+  double get _screenWidth => MediaQuery.of(context).size.width;
+  bool get _isSmallTablet => _screenWidth < 800;
+  bool get _isTinyTablet  => _screenWidth < 600;
+
+  /// Lebar kolom kanan (cart + summary)
+  double get _rightPanelWidth {
+    if (_isTinyTablet) return _screenWidth * 0.46;
+    if (_isSmallTablet) return _screenWidth * 0.42;
+    return _screenWidth * 0.38;
+  }
+
+  /// Padding umum untuk container (header, summary)
+  EdgeInsets get _panelPadding =>
+      EdgeInsets.all(_isTinyTablet ? 8 : _isSmallTablet ? 10 : 12);
+
+  /// Font size label utama (Total, store name, dsb.)
+  double get _labelFontSize => _isTinyTablet ? 13 : _isSmallTablet ? 14 : 16;
+
+  /// Tinggi tombol aksi (BAYAR, PENDING)
+  double get _buttonHeight => _isTinyTablet ? 40 : _isSmallTablet ? 44 : 48;
+
+  /// Jumlah kolom pada grid gambar produk
+  int get _gridColumns {
+    if (_isTinyTablet) return 2;
+    if (_isSmallTablet) return 3;
+    return 4;
+  }
+
+  // ============================================================
   // BUILD
   // ============================================================
   @override
@@ -1903,6 +2230,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.watch(penjualanProvider);
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1D273B),
@@ -1941,43 +2269,67 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // ── KOLOM KIRI (60%) — identitas + product image grid ──
-          Expanded(
-            flex: 6,
-            child: Column(
+      body: _isTinyTablet
+          // ── LAYOUT STACKED (tablet 7" portrait < 600dp) ───────────
+          ? Column(
               children: [
                 _buildHeader(state),
                 Expanded(
                   child: _buildImageGrid(),
                 ),
-              ],
-            ),
-          ),
-          Container(width: 1, color: Colors.grey.shade300),
-          // ── KOLOM KANAN (40%) — cart list + summary ────────────
-          SizedBox(
-            width: MediaQuery.of(context).size.width * 0.38,
-            child: Column(
-              children: [
-                // Cart list (expandable)
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: _checkShiftStillActive,
-                    color: const Color(0xFF1D273B),
-                    child: _buildCart(state),
+                Container(height: 1, color: Colors.grey.shade300),
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.44,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: _checkShiftStillActive,
+                          color: const Color(0xFF1D273B),
+                          child: _buildCart(state),
+                        ),
+                      ),
+                      Container(height: 1, color: Colors.grey.shade300),
+                      _buildSummaryScrollable(state),
+                    ],
                   ),
                 ),
-                // Divider
-                Container(height: 1, color: Colors.grey.shade300),
-                // Summary + cara bayar + tombol
-                _buildSummary(state),
+              ],
+            )
+          // ── LAYOUT SIDE-BY-SIDE (tablet 7" landscape ke atas) ────
+          : Row(
+              children: [
+                // ── KOLOM KIRI — identitas + product image grid ──
+                Expanded(
+                  child: Column(
+                    children: [
+                      _buildHeader(state),
+                      Expanded(
+                        child: _buildImageGrid(),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(width: 1, color: Colors.grey.shade300),
+                // ── KOLOM KANAN — cart list + summary ────────────
+                SizedBox(
+                  width: _rightPanelWidth,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: _checkShiftStillActive,
+                          color: const Color(0xFF1D273B),
+                          child: _buildCart(state),
+                        ),
+                      ),
+                      Container(height: 1, color: Colors.grey.shade300),
+                      _buildSummaryScrollable(state),
+                    ],
+                  ),
+                ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1987,7 +2339,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   Widget _buildHeader(PenjualanState state) {
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(12),
+      padding: _panelPadding,
       child: Column(
         children: [
           // Row 1: Store + Invoice
@@ -2172,6 +2524,22 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           ),
           const SizedBox(height: 8),
 
+          // Row 3.5: Keterangan Transaksi
+          TextField(
+            controller: _keteranganController,
+            decoration: const InputDecoration(
+              labelText: 'Keterangan transaksi (opsional)',
+              border: OutlineInputBorder(),
+              contentPadding:
+                  EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              isDense: true,
+              prefixIcon: Icon(Icons.notes_outlined, size: 18),
+            ),
+            maxLines: 1,
+            textInputAction: TextInputAction.done,
+          ),
+          const SizedBox(height: 8),
+
           // Row 4: SKU Search
           TextField(
             controller: _skuController,
@@ -2200,7 +2568,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     if (_isLoadingImages) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_imageProducts.isEmpty) {
+    if (_imageCategories.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2215,17 +2583,59 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       );
     }
 
+    // Selalu pakai DefaultTabController agar tab kategori selalu muncul
+    return DefaultTabController(
+      length: _imageCategories.length,
+      child: Column(
+        children: [
+          // Tab bar kategori
+          Container(
+            color: Colors.white,
+            child: TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelColor: const Color(0xFF1D273B),
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: const Color(0xFF1D273B),
+              labelStyle: TextStyle(
+                fontSize: _isTinyTablet ? 11 : 13,
+                fontWeight: FontWeight.w600,
+              ),
+              unselectedLabelStyle: TextStyle(
+                fontSize: _isTinyTablet ? 11 : 13,
+              ),
+              tabs: _imageCategories
+                  .map((cat) => Tab(text: cat['nama']?.toString() ?? ''))
+                  .toList(),
+            ),
+          ),
+          // Grid produk per tab
+          Expanded(
+            child: TabBarView(
+              children: _imageCategories.map((cat) {
+                final produk = cat['produk'] as List<Map<String, dynamic>>;
+                return _buildProductGrid(produk);
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Grid produk gambar (dipakai oleh _buildImageGrid)
+  Widget _buildProductGrid(List<Map<String, dynamic>> products) {
     return GridView.builder(
-      padding: const EdgeInsets.all(10),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
+      padding: EdgeInsets.all(_isTinyTablet ? 6 : 10),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: _gridColumns,
+        mainAxisSpacing: _isTinyTablet ? 6 : 10,
+        crossAxisSpacing: _isTinyTablet ? 6 : 10,
         childAspectRatio: 0.72,
       ),
-      itemCount: _imageProducts.length,
+      itemCount: products.length,
       itemBuilder: (_, i) {
-        final p = _imageProducts[i];
+        final p = products[i];
         final imageUrl = p['image']?.toString() ?? '';
         final nama = p['nama']?.toString() ?? '';
         final kode = p['kode']?.toString() ?? '';
@@ -2318,74 +2728,171 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         // Tampilkan badge "Package" jika ada packagesNotes
         final isPackage =
             item.packagesNotes != null && item.packagesNotes!.isNotEmpty;
+
+        // Inisialisasi controller notes jika belum ada
+        if (!_itemNotesControllers.containsKey(i)) {
+          _itemNotesControllers[i] = TextEditingController(
+            text: item.keterangan ?? '',
+          );
+        }
+        final notesCtrl = _itemNotesControllers[i]!;
+        final isExpanded = _expandedNotes.contains(i);
+        final hasNotes = (item.keterangan ?? '').isNotEmpty;
+
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(item.nama,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                          ),
-                          if (isPackage)
-                            Container(
-                              margin: const EdgeInsets.only(left: 4),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.shade50,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.blue.shade200),
-                              ),
-                              child: const Text('Package',
-                                  style: TextStyle(
-                                      fontSize: 10, color: Colors.blue)),
-                            ),
-                        ],
-                      ),
-                      Text(item.kode,
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.grey)),
-                      Text('Rp ${CurrencyFormat.format(item.hpj)}',
-                          style: const TextStyle(fontSize: 12)),
-                    ],
-                  ),
-                ),
-                // Qty control
                 Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: () => _updateQty(i, item.qty - 1),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(item.nama,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                              if (isPackage)
+                                Container(
+                                  margin: const EdgeInsets.only(left: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.blue.shade200),
+                                  ),
+                                  child: const Text('Package',
+                                      style: TextStyle(
+                                          fontSize: 10, color: Colors.blue)),
+                                ),
+                            ],
+                          ),
+                          Text(item.kode,
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.grey)),
+                          Text('Rp ${CurrencyFormat.format(item.hpj)}',
+                              style: const TextStyle(fontSize: 12)),
+                        ],
+                      ),
                     ),
-                    Text('${item.qty}',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    IconButton(
-                      icon: const Icon(Icons.add_circle_outline),
-                      onPressed: () => _updateQty(i, item.qty + 1),
+                    // Qty control
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline),
+                          onPressed: () => _updateQty(i, item.qty - 1),
+                        ),
+                        Text('${item.qty}',
+                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                        IconButton(
+                          icon: const Icon(Icons.add_circle_outline),
+                          onPressed: () => _updateQty(i, item.qty + 1),
+                        ),
+                      ],
+                    ),
+                    // Subtotal + delete + notes toggle
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text('Rp ${CurrencyFormat.format(item.subtotal)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Ikon notes — kuning jika sudah ada notes
+                            IconButton(
+                              icon: Icon(
+                                hasNotes
+                                    ? Icons.edit_note
+                                    : Icons.add_comment_outlined,
+                                size: 20,
+                                color: hasNotes
+                                    ? Colors.amber.shade700
+                                    : Colors.grey,
+                              ),
+                              tooltip: 'Catatan item',
+                              onPressed: () {
+                                setState(() {
+                                  if (isExpanded) {
+                                    _expandedNotes.remove(i);
+                                  } else {
+                                    _expandedNotes.add(i);
+                                  }
+                                });
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete,
+                                  color: Colors.red, size: 20),
+                              onPressed: () => _removeItem(i),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                // Subtotal + delete
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('Rp ${CurrencyFormat.format(item.subtotal)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    IconButton(
-                      icon:
-                          const Icon(Icons.delete, color: Colors.red, size: 20),
-                      onPressed: () => _removeItem(i),
+                // Inline notes input — tampil jika expanded
+                if (isExpanded)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 2),
+                    child: TextField(
+                      controller: notesCtrl,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: 'Catatan untuk item ini...',
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        isDense: true,
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.check, size: 18,
+                              color: Color(0xFF1D273B)),
+                          onPressed: () async {
+                            final ket = notesCtrl.text.trim();
+                            await _updateItemKeterangan(i, ket);
+                            setState(() => _expandedNotes.remove(i));
+                          },
+                        ),
+                      ),
+                      maxLines: 1,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (val) async {
+                        await _updateItemKeterangan(i, val.trim());
+                        setState(() => _expandedNotes.remove(i));
+                      },
                     ),
-                  ],
-                ),
+                  )
+                // Tampilkan notes yang sudah tersimpan (collapsed)
+                else if (hasNotes)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2, left: 2),
+                    child: Row(
+                      children: [
+                        Icon(Icons.notes, size: 13,
+                            color: Colors.amber.shade700),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            item.keterangan ?? '',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.amber.shade800,
+                                fontStyle: FontStyle.italic),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
@@ -2395,17 +2902,41 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   // ============================================================
+  // SUMMARY SCROLLABLE WRAPPER
+  // Membungkus _buildSummary agar tidak ketimpa virtual keyboard.
+  // Ketika keyboard muncul, summary otomatis bisa di-scroll ke atas
+  // sehingga field Nominal Bayar & tombol BAYAR tetap terlihat.
+  // ============================================================
+  Widget _buildSummaryScrollable(PenjualanState state) {
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    return ConstrainedBox(
+      // Batasi tinggi maksimum agar tidak overflow saat keyboard tutup,
+      // tapi tetap bisa tumbuh saat keyboard terbuka.
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.55,
+      ),
+      child: SingleChildScrollView(
+        // Padding bawah = tinggi keyboard sehingga konten tidak tertutup
+        padding: EdgeInsets.only(bottom: keyboardHeight),
+        // Scroll ke bawah otomatis saat keyboard muncul
+        reverse: false,
+        child: _buildSummary(state),
+      ),
+    );
+  }
+
+  // ============================================================
   // SUMMARY PANEL (kanan)
   // ============================================================
   Widget _buildSummary(PenjualanState state) {
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(16),
+      padding: _panelPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Total Pembelian',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          Text('Total Pembelian',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
           const Divider(),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             const Text('Gross'),
@@ -2418,11 +2949,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           ]),
           const Divider(),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('TOTAL',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text('TOTAL',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
             Text('Rp ${CurrencyFormat.format(state.total)}',
                 style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    TextStyle(fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
           ]),
           const Divider(),
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -2487,7 +3018,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           // PENDING
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: _buttonHeight,
             child: ElevatedButton(
               onPressed: state.items.isEmpty ? null : _showPendingDialog,
               style: ElevatedButton.styleFrom(
@@ -2495,9 +3026,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
-              child: const Text('PENDING PAYMENT',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
+              child: Text(
+                _isTinyTablet ? 'PENDING' : 'PENDING PAYMENT',
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -2505,7 +3038,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           // BAYAR
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: _buttonHeight,
             child: ElevatedButton(
               onPressed: state.items.isEmpty ? null : _prosesBayar,
               style: ElevatedButton.styleFrom(
@@ -2513,11 +3046,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
-              child: const Text('BAYAR',
+              child: Text('BAYAR',
                   style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 16)),
+                      fontSize: _labelFontSize)),
             ),
           ),
         ],

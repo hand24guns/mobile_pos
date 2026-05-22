@@ -3,8 +3,9 @@ import '../utils/currency_format.dart';
 class CartItem {
   final String kode;
   final String nama;
-  final String?
-      packagesNotes; // Ini tetap final jika tidak diubah setelah object dibuat
+  final String? packagesNotes;
+  final double packageAddonHarga;
+  final String? keterangan;
   int qty;
   double hpj;
   double diskonPersen;
@@ -16,7 +17,9 @@ class CartItem {
     required this.nama,
     required this.qty,
     required this.hpj,
-    this.packagesNotes, // Parameter bernama (Named Parameter)
+    this.packagesNotes,
+    this.packageAddonHarga = 0,
+    this.keterangan,
     this.diskonPersen = 0,
     this.diskonNominal = 0,
     double? subtotal,
@@ -36,8 +39,12 @@ class CartItem {
       nama: json['nama'] ?? '',
       qty: int.tryParse(json['qty'].toString()) ?? 0,
       hpj: double.tryParse(json['hpj'].toString().replaceAll(',', '')) ?? 0,
-      packagesNotes: json['packages_notes']
-          as String?, // Pastikan menggunakan titik dua (:) bukan sama dengan (=)
+      packagesNotes: json['packages_notes'] as String?,
+      packageAddonHarga:
+          double.tryParse(json['package_addon_harga']?.toString() ?? '0') ?? 0,
+      keterangan: (json['keterangan'] as String?)?.isNotEmpty == true
+          ? json['keterangan'] as String
+          : null,
       diskonPersen:
           double.tryParse(json['diskon_persen']?.toString() ?? '0') ?? 0,
       diskonNominal:

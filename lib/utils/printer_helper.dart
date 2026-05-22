@@ -1,8 +1,79 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 
 class PrinterHelper {
+  // ── Ambil logo untuk print ───────────────────────────────────
+  //
+  // Flow:
+  //   1. Cek file lokal di app documents dir → pakai langsung jika ada
+  //   2. Jika tidak ada → download dari [logoUrl] → simpan lokal → pakai
+  //   3. Jika gagal semua → return null (cetak tanpa logo, graceful)
+  //
+  // [logoFileName] — nama file saja, contoh: "logo_abc.png"
+  // [logoUrl]      — full URL untuk download fallback
+  static Future<img.Image?> _getLogoImage({
+    required String logoFileName,
+    required String logoUrl,
+  }) async {
+    try {
+      final dir       = await getApplicationDocumentsDirectory();
+      final localPath = '${dir.path}/logos/$logoFileName';
+      final localFile = File(localPath);
+
+      Uint8List imageBytes;
+
+      if (await localFile.exists()) {
+        // ── Pakai file lokal (cache) ──────────────────────────
+        imageBytes = await localFile.readAsBytes();
+      } else {
+        // ── Download dari server ──────────────────────────────
+        final response = await http
+            .get(Uri.parse(logoUrl))
+            .timeout(const Duration(seconds: 8));
+        if (response.statusCode != 200) return null;
+
+        imageBytes = response.bodyBytes;
+
+        // Simpan ke lokal untuk dipakai berikutnya
+        await localFile.parent.create(recursive: true);
+        await localFile.writeAsBytes(imageBytes);
+      }
+
+      // ── Decode & proses untuk thermal ────────────────────────
+      // Resize max 200px width (proporsional), lalu grayscale
+      // agar hasil cetak bersih di kertas 58mm
+      final decoded = img.decodeImage(imageBytes);
+      if (decoded == null) return null;
+
+      final resized    = img.copyResize(decoded, width: 200);
+      final grayscaled = img.grayscale(resized);
+      return grayscaled;
+    } catch (_) {
+      // Network error, decode error, dsb → skip logo
+      return null;
+    }
+  }
+
+  // ── Hapus semua cache logo lokal ─────────────────────────────
+  //
+  // Panggil ini saat logo toko diupdate di server,
+  // supaya print berikutnya otomatis re-download yang baru.
+  static Future<void> clearLogoCache() async {
+    try {
+      final dir      = await getApplicationDocumentsDirectory();
+      final logosDir = Directory('${dir.path}/logos');
+      if (await logosDir.exists()) {
+        await logosDir.delete(recursive: true);
+      }
+    } catch (_) {}
+  }
+
   // ── Scan device bluetooth yang tersedia ─────────────────────
   static Future<List<BluetoothInfo>> scanDevices() async {
     bool isConnected = await PrintBluetoothThermal.connectionStatus;
@@ -37,6 +108,21 @@ class PrinterHelper {
   //   copyCount == 1  → first print, tidak ada ribbon COPY
   //   copyCount >= 2  → reprint, tampilkan ribbon "***** COPY N *****"
   //   Nilai N = copyCount - 1  (misal print ke-2 = COPY 1, ke-3 = COPY 2)
+  //
+  // [items] — setiap Map boleh mengandung field berikut:
+  //   'nama'            String   — nama produk (wajib)
+  //   'qty'             num      — kuantitas (wajib)
+  //   'hpj'             num      — harga per unit (wajib)
+  //   'subtotal'        num      — qty × hpj (wajib)
+  //   'diskon_persen'   num?     — diskon persen (opsional)
+  //   'diskon_nominal'  num?     — diskon nominal (opsional)
+  //   'packages_notes'  String?  — JSON isian/addon gabungan (opsional)
+  //   'isian'           List?    — list string nama isian (opsional, fallback)
+  //   'addon'           List?    — list map/string addon (opsional, fallback)
+  //
+  // [salesTipe] — dari dim_salestipe.nama (JOIN tr_invoice → dim_salestipe
+  //   via dim_salestipe_id). Contoh: "POS - OFFLINE", "ONLINE", "DINE IN".
+  //   Ditampilkan di tengah dengan bold setelah info transaksi.
   static Future<bool> printInvoice({
     required String storeName,
     required String storeAddress,
@@ -60,21 +146,45 @@ class PrinterHelper {
     String? npwp,
     String? invoiceNote,       // dari dim_divisi.invoice_note
     String? salesTipe,         // dari dim_salestipe.nama — channel penjualan
+    String? keterangan,        // catatan keseluruhan transaksi (dari tr_invoice.keterangan)
+    String? logoFileName,      // nama file logo saja, contoh: "logo_abc.png"
+    String? logoUrl,           // full URL untuk download fallback
   }) async {
     final profile   = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
     List<int> bytes = [];
 
-    // ── HEADER ──────────────────────────────────────────────────
-    bytes += generator.text(
-      storeName,
-      styles: const PosStyles(
-        align: PosAlign.center,
-        height: PosTextSize.size2,
-        width: PosTextSize.size2,
-        bold: true,
-      ),
-    );
+    // ── LOGO — sebelum nama toko ─────────────────────────────────
+    // Cek lokal dulu, download jika belum ada, skip jika gagal
+    if (logoFileName != null && logoFileName.isNotEmpty &&
+        logoUrl != null && logoUrl.isNotEmpty) {
+      final logoImage = await _getLogoImage(
+        logoFileName: logoFileName,
+        logoUrl: logoUrl,
+      );
+      if (logoImage != null) {
+        bytes += generator.image(logoImage, align: PosAlign.center);
+        bytes += generator.feed(1);
+      }
+    }
+
+    // ── HEADER — store name dengan word-wrap ─────────────────────
+    // Kertas 58mm double-size = ±16 karakter per baris.
+    // _wrapWords memastikan pecah di awal kata, bukan di tengah kata.
+    const int headerLineWidth = 16;
+    final storeNameLines = _wrapWords(storeName, headerLineWidth);
+    for (final line in storeNameLines) {
+      bytes += generator.text(
+        line,
+        styles: const PosStyles(
+          align: PosAlign.center,
+          height: PosTextSize.size2,
+          width: PosTextSize.size2,
+          bold: true,
+        ),
+      );
+    }
+
     if (storeAddress.isNotEmpty) {
       bytes += generator.text(
         storeAddress,
@@ -93,11 +203,14 @@ class PrinterHelper {
 
     bytes += generator.hr();
 
-    // ── RIBBON COPY — hanya muncul saat reprint ──────────────────
+    // ── FIX #4: RIBBON COPY — hanya muncul saat reprint ─────────
+    // Pastikan caller pass copyCount >= 2 saat reprint.
+    // Contoh: copyCount = 2 → "***** COPY 1 *****"
+    //         copyCount = 3 → "***** COPY 2 *****"
     if (copyCount >= 2) {
       final copyNum = copyCount - 1;
       bytes += generator.text(
-        '***** COPY $copyNum *****',
+        '*** COPY $copyNum ***',
         styles: const PosStyles(
           align: PosAlign.center,
           bold: true,
@@ -115,8 +228,13 @@ class PrinterHelper {
     if (memberNama.isNotEmpty) {
       bytes += generator.text('Mbr: $memberNama');
     }
+    if (keterangan != null && keterangan.isNotEmpty) {
+      bytes += generator.text('Ket: $keterangan');
+    }
 
-    // ── Channel penjualan ────────────────────────────────────────
+    // ── FIX #3: Sales tipe / channel penjualan ───────────────────
+    // Nilai dari: tr_invoice JOIN dim_salestipe ON dim_salestipe_id
+    // Pass via parameter salesTipe. Contoh: "POS - OFFLINE"
     if (salesTipe != null && salesTipe.isNotEmpty) {
       bytes += generator.hr();
       bytes += generator.text(
@@ -130,11 +248,8 @@ class PrinterHelper {
 
     bytes += generator.hr();
 
-    // ── ITEM LIST ────────────────────────────────────────────────
+    // ── FIX #2: ITEM LIST dengan isian & addon ───────────────────
     for (var item in items) {
-      final packagesNotesRaw = item['packages_notes'] as String? ?? '';
-      final isPackage = packagesNotesRaw.isNotEmpty;
-
       // Nama produk
       bytes += generator.text(
         item['nama'] as String,
@@ -155,9 +270,24 @@ class PrinterHelper {
             '  Diskon: ${_formatNumber(item['diskon_nominal'])}');
       }
 
-      // ── Sub-item package ───────────────────────────────────────
-      if (isPackage) {
+      // Keterangan per item (jika ada)
+      final itemKet = item['keterangan'] as String? ?? '';
+      if (itemKet.isNotEmpty) {
+        bytes += generator.text('  >> $itemKet');
+      }
+
+      // ── Sub-item: isian & addon ──────────────────────────────
+      // Prioritas 1: packages_notes (JSON string gabungan)
+      // Prioritas 2: field 'isian' dan 'addon' langsung di map item
+      final packagesNotesRaw = item['packages_notes'] as String? ?? '';
+      if (packagesNotesRaw.isNotEmpty) {
         final packageLines = _buildPackageLines(packagesNotesRaw);
+        for (final line in packageLines) {
+          bytes += generator.text(line);
+        }
+      } else {
+        // Fallback: baca field isian/addon langsung dari item map
+        final packageLines = _buildPackageLinesFromMap(item);
         for (final line in packageLines) {
           bytes += generator.text(line);
         }
@@ -303,9 +433,11 @@ class PrinterHelper {
     required List<Map<String, dynamic>> items,
     required double total,
     int copyCount = 1,       // 1 = first print, >=2 = reprint
+    String memberNama = '',  // nama member — tampil di bawah kasir
     String? tableInfo,       // meja / nama customer / takeaway
     String? salesTipe,       // channel penjualan (dine-in, takeaway, dll)
     String? orderNote,       // catatan order keseluruhan
+    String? keterangan,      // catatan transaksi (dari tr_invoice.keterangan)
   }) async {
     final profile   = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
@@ -317,14 +449,18 @@ class PrinterHelper {
       styles: const PosStyles(
         align: PosAlign.center,
         bold: true,
-        height: PosTextSize.size2,
-        width: PosTextSize.size2,
       ),
     );
-    bytes += generator.text(
-      storeName,
-      styles: const PosStyles(align: PosAlign.center, bold: true),
-    );
+
+    // Store name dengan word-wrap (normal size, tidak double di kitchen)
+    const int kitchenHeaderWidth = 32;
+    final storeNameLines = _wrapWords(storeName, kitchenHeaderWidth);
+    for (final line in storeNameLines) {
+      bytes += generator.text(
+        line,
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      );
+    }
 
     bytes += generator.hr();
 
@@ -332,7 +468,7 @@ class PrinterHelper {
     if (copyCount >= 2) {
       final copyNum = copyCount - 1;
       bytes += generator.text(
-        '***** COPY $copyNum *****',
+        '*** COPY $copyNum ***',
         styles: const PosStyles(
           align: PosAlign.center,
           bold: true,
@@ -347,6 +483,12 @@ class PrinterHelper {
     bytes += generator.text('No : $invoiceNumber');
     bytes += generator.text('Tgl: $tanggal');
     bytes += generator.text('Kas: $kasir');
+    if (memberNama.isNotEmpty) {
+      bytes += generator.text('Mbr: $memberNama');
+    }
+    if (keterangan != null && keterangan.isNotEmpty) {
+      bytes += generator.text('Ket: $keterangan');
+    }
 
     if (tableInfo != null && tableInfo.isNotEmpty) {
       bytes += generator.text(
@@ -372,21 +514,27 @@ class PrinterHelper {
     bytes += generator.hr();
 
     // ── ITEM LIST (tanpa harga) ──────────────────────────────────
+    //
+    // Lebar kertas 58mm normal size = ~32 char per baris.
+    // Format: baris pertama  "1 x Nama Awal"
+    //         baris lanjutan "    Nama Lanjutan"
+    const int kitchenLineWidth = 32; // char per baris untuk normal size
     for (var item in items) {
-      final packagesNotesRaw = item['packages_notes'] as String? ?? '';
-      final isPackage = packagesNotesRaw.isNotEmpty;
-
-      // Nama + qty — bold, ukuran lebih besar agar mudah dibaca dapur
       final qty  = item['qty'];
       final nama = item['nama'] as String;
-      bytes += generator.text(
-        '$qty x $nama',
-        styles: const PosStyles(
-          bold: true,
-          height: PosTextSize.size2,
-          width: PosTextSize.size2,
-        ),
-      );
+
+      // Prefix baris pertama: "1 x " — lanjutan: spasi sejumlah prefix
+      final prefix      = '$qty x ';
+      final prefixBlank = ' ' * prefix.length;
+      final namaLines   = _wrapWords(nama, kitchenLineWidth - prefix.length);
+
+      for (int i = 0; i < namaLines.length; i++) {
+        final lineText = (i == 0 ? prefix : prefixBlank) + namaLines[i];
+        bytes += generator.text(
+          lineText,
+          styles: const PosStyles(bold: true),
+        );
+      }
 
       // Catatan item (jika ada kolom 'note' per item)
       final itemNote = item['note'] as String? ?? '';
@@ -394,9 +542,21 @@ class PrinterHelper {
         bytes += generator.text('  >> $itemNote');
       }
 
-      // ── Sub-item package ───────────────────────────────────────
-      if (isPackage) {
+      // Keterangan per item (dari kolom keterangan temp_invoice / tr_invoicedetil)
+      final itemKet = item['keterangan'] as String? ?? '';
+      if (itemKet.isNotEmpty) {
+        bytes += generator.text('  >> $itemKet');
+      }
+
+      // ── Sub-item package (isian & addon) ──────────────────────
+      final packagesNotesRaw = item['packages_notes'] as String? ?? '';
+      if (packagesNotesRaw.isNotEmpty) {
         final packageLines = _buildPackageLines(packagesNotesRaw);
+        for (final line in packageLines) {
+          bytes += generator.text(line);
+        }
+      } else {
+        final packageLines = _buildPackageLinesFromMap(item);
         for (final line in packageLines) {
           bytes += generator.text(line);
         }
@@ -478,6 +638,9 @@ class PrinterHelper {
     String? orderNote,
     // — shared optional —
     String? salesTipe,
+    String? keterangan,      // catatan transaksi — diteruskan ke customer & kitchen
+    String? logoFileName,    // nama file logo — hanya untuk customer copy
+    String? logoUrl,         // full URL fallback download logo
   }) async {
     final customerOk = await printInvoice(
       storeName: storeName,
@@ -500,10 +663,12 @@ class PrinterHelper {
       npwp: npwp,
       invoiceNote: invoiceNote,
       salesTipe: salesTipe,
-      copyCount: 1, // first print, tidak ada ribbon
+      keterangan: keterangan,
+      logoFileName: logoFileName,
+      logoUrl: logoUrl,
+      copyCount: 1,
     );
 
-    // Jeda singkat antar print agar buffer printer tidak penuh
     await Future.delayed(const Duration(milliseconds: 500));
 
     final kitchenOk = await printKitchen(
@@ -511,21 +676,47 @@ class PrinterHelper {
       invoiceNumber: invoiceNumber,
       tanggal: tanggal,
       kasir: kasir,
+      memberNama: memberNama,
       items: items,
       total: total,
       tableInfo: tableInfo,
       salesTipe: salesTipe,
       orderNote: orderNote,
-      copyCount: 1, // first print, tidak ada ribbon
+      keterangan: keterangan,
+      copyCount: 1,
     );
 
     return (customer: customerOk, kitchen: kitchenOk);
   }
 
-  // ── Parse packages_notes dan bangun baris struk ─────────────
+  // ── Word-wrap: pecah teks per kata agar tidak terpotong ─────
+  //
+  // [maxWidth] = maks jumlah karakter per baris.
+  // Pindah baris selalu di awal kata, bukan di tengah.
+  static List<String> _wrapWords(String text, int maxWidth) {
+    if (maxWidth <= 0) return [text];
+    final words = text.split(' ');
+    final List<String> lines = [];
+    String current = '';
+
+    for (final word in words) {
+      if (current.isEmpty) {
+        current = word;
+      } else if ((current.length + 1 + word.length) <= maxWidth) {
+        current += ' $word';
+      } else {
+        lines.add(current);
+        current = word;
+      }
+    }
+    if (current.isNotEmpty) lines.add(current);
+    return lines.isEmpty ? [''] : lines;
+  }
+
+  // ── Parse packages_notes (JSON string) dan bangun baris struk ─
   //
   // Format baru (setelah fix PHP):
-  //   {"isian":["Gurita","Crabstick"],"addon":[{"nama":"Bon Cabe","harga":1000},{"nama":"Topping Terpisah","harga":2000}]}
+  //   {"isian":["Gurita","Crabstick"],"addon":[{"nama":"Bon Cabe","harga":1000}]}
   //
   // Format lama (data yang sudah ada sebelum fix):
   //   {"isian":["Gurita","Crabstick"],"addon":["Bon Cabe","Topping Terpisah"]}
@@ -533,44 +724,65 @@ class PrinterHelper {
   // Kedua format ditangani.
   static List<String> _buildPackageLines(String notesJson) {
     if (notesJson.isEmpty) return [];
-
-    final List<String> lines = [];
-
     try {
       final Map<String, dynamic> notes = jsonDecode(notesJson);
+      return _extractIsianAddon(
+        isianRaw: notes['isian'],
+        addonRaw: notes['addon'],
+      );
+    } catch (_) {
+      // JSON tidak valid — skip sub-item, tidak crash
+      return [];
+    }
+  }
 
-      // ── Isian ────────────────────────────────────────────────
-      final isianRaw = notes['isian'];
-      if (isianRaw is List && isianRaw.isNotEmpty) {
-        lines.add('  Isian:');
-        for (final item in isianRaw) {
-          lines.add('    * ${item.toString()}');
-        }
+  // ── Fallback: baca isian/addon langsung dari item Map ────────
+  //
+  // Digunakan jika packages_notes tidak ada atau kosong.
+  // Item map boleh mengandung:
+  //   'isian'  → List<dynamic> berisi string nama isian
+  //   'addon'  → List<dynamic> berisi string atau Map {nama, harga}
+  static List<String> _buildPackageLinesFromMap(Map<String, dynamic> item) {
+    final isianRaw = item['isian'];
+    final addonRaw = item['addon'];
+    if (isianRaw == null && addonRaw == null) return [];
+    return _extractIsianAddon(isianRaw: isianRaw, addonRaw: addonRaw);
+  }
+
+  // ── Core extractor: dari raw isian/addon ke list baris teks ──
+  static List<String> _extractIsianAddon({
+    dynamic isianRaw,
+    dynamic addonRaw,
+  }) {
+    final List<String> lines = [];
+
+    // Isian
+    if (isianRaw is List && isianRaw.isNotEmpty) {
+      lines.add('  Isian:');
+      for (final item in isianRaw) {
+        lines.add('    * ${item.toString()}');
       }
+    }
 
-      // ── Addon ────────────────────────────────────────────────
-      final addonRaw = notes['addon'];
-      if (addonRaw is List && addonRaw.isNotEmpty) {
-        lines.add('  Add On:');
-        for (final addon in addonRaw) {
-          if (addon is Map) {
-            // Format baru: {"nama": "Bon Cabe", "harga": 1000}
-            final nama  = addon['nama']?.toString() ?? '';
-            final harga = double.tryParse(addon['harga'].toString()) ?? 0;
-            if (nama.isNotEmpty) {
-              final hargaStr = harga > 0 ? ' +${_formatNumber(harga)}' : '';
-              lines.add('    * $nama$hargaStr');
-            }
-          } else {
-            // Format lama: string biasa tanpa harga
-            if (addon.toString().isNotEmpty) {
-              lines.add('    * ${addon.toString()}');
-            }
+    // Addon
+    if (addonRaw is List && addonRaw.isNotEmpty) {
+      lines.add('  Add On:');
+      for (final addon in addonRaw) {
+        if (addon is Map) {
+          // Format baru: {"nama": "Bon Cabe", "harga": 1000}
+          final nama  = addon['nama']?.toString() ?? '';
+          final harga = double.tryParse(addon['harga'].toString()) ?? 0;
+          if (nama.isNotEmpty) {
+            final hargaStr = harga > 0 ? ' +${_formatNumber(harga)}' : '';
+            lines.add('    * $nama$hargaStr');
+          }
+        } else {
+          // Format lama: string biasa tanpa harga
+          if (addon.toString().isNotEmpty) {
+            lines.add('    * ${addon.toString()}');
           }
         }
       }
-    } catch (_) {
-      // JSON tidak valid — skip sub-item, tidak crash
     }
 
     return lines;
