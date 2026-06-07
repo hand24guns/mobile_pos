@@ -15,23 +15,23 @@ class InvoiceListScreen extends StatefulWidget {
 }
 
 class _InvoiceListScreenState extends State<InvoiceListScreen> {
-  String _token        = '';
-  int    _userID       = 0;
-  int    _organisasiID = 0;
+  String _token = '';
+  int _userID = 0;
+  int _organisasiID = 0;
   // Store data — dipakai untuk print & WA & email
-  int    _activeStoreID      = 0;
-  String _activeStoreName    = '';
+  int _activeStoreID = 0;
+  String _activeStoreName = '';
   String _activeStoreAddress = '';
-  String _activeStoreNpwp    = '';
-  String _activeInvoiceNote  = '';
-  String _logoFileName       = '';
-  String _logoUrl            = '';
-  int    _waEnabled          = 0;
-  bool   _isFnB        = false;  // true jika jasa_perusahaan == 3
-  bool   _isMultiStore = false;
-  bool   _isLoading    = true;
+  String _activeStoreNpwp = '';
+  String _activeInvoiceNote = '';
+  String _logoFileName = '';
+  String _logoUrl = '';
+  int _waEnabled = 0;
+  bool _isFnB = false; // true jika jasa_perusahaan == 3
+  bool _isMultiStore = false;
+  bool _isLoading = true;
   DateTime _dateFrom = DateTime.now().subtract(const Duration(days: 9));
-  DateTime _dateTo   = DateTime.now();
+  DateTime _dateTo = DateTime.now();
   List<Map<String, dynamic>> _invoices = [];
 
   @override
@@ -43,7 +43,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   Future<void> _loadData() async {
     try {
       final session = await SessionService.getSession();
-      _token  = session['token'];
+      _token = session['token'];
       _userID = session['user_id'];
 
       final dio = ApiService.getDio(token: _token);
@@ -51,32 +51,31 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       // Ambil semua store yang bisa diakses user
       final storeRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':  'getStores',
+            'action': 'getStores',
             'user_id': _userID,
           }));
-      final stores =
-          List<Map<String, dynamic>>.from(storeRes.data['data']);
+      final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
       _isMultiStore = stores.length > 1;
 
       // Ambil organisasiID + flag FnB dari store pertama
       _activeStoreID = int.parse(stores.first['id'].toString());
       final orgRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':   'getOrganisasiID',
+            'action': 'getOrganisasiID',
             'store_id': _activeStoreID,
           }));
       _organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
-      _isFnB        = (orgRes.data['is_fnb'] == 1);
+      _isFnB = (orgRes.data['is_fnb'] == 1);
 
       // Cek shift aktif user → untuk tahu store mana yang aktif
       final shiftRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':  'cekShiftUser',
+            'action': 'cekShiftUser',
             'user_id': _userID,
           }));
 
       if (shiftRes.data['has_shift'] == true) {
-        _activeStoreID   = shiftRes.data['store_id'];
+        _activeStoreID = shiftRes.data['store_id'];
         _activeStoreName = shiftRes.data['store_nama'];
         // Override flag FnB dari shift (sudah ada di response cekShiftUser)
         _isFnB = (shiftRes.data['is_fnb'] == 1);
@@ -88,15 +87,15 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       // Pakai getStoreData agar logo_file_name + logo_url ikut di-return
       final settingRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':   'getStoreData',
+            'action': 'getStoreData',
             'store_id': _activeStoreID,
           }));
       _activeStoreAddress = settingRes.data['alamat'] ?? '';
-      _activeStoreNpwp    = settingRes.data['npwp'] ?? '';
-      _activeInvoiceNote  = settingRes.data['invoice_note'] ?? '';
-      _logoFileName       = settingRes.data['logo_file_name'] ?? '';
-      _logoUrl            = settingRes.data['logo_url'] ?? '';
-      _waEnabled          = settingRes.data['wa'] ?? 0;
+      _activeStoreNpwp = settingRes.data['npwp'] ?? '';
+      _activeInvoiceNote = settingRes.data['invoice_note'] ?? '';
+      _logoFileName = settingRes.data['logo_file_name'] ?? '';
+      _logoUrl = settingRes.data['logo_url'] ?? '';
+      _waEnabled = settingRes.data['wa'] ?? 0;
 
       await _loadInvoices();
       setState(() => _isLoading = false);
@@ -108,17 +107,17 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   }
 
   Future<void> _loadInvoices() async {
-    final dio      = ApiService.getDio(token: _token);
+    final dio = ApiService.getDio(token: _token);
     final dateFrom = _dateFrom.toIso8601String().substring(0, 10);
-    final dateTo   = _dateTo.toIso8601String().substring(0, 10);
+    final dateTo = _dateTo.toIso8601String().substring(0, 10);
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'getInvoiceList',
-          'user_id':       _userID,
+          'action': 'getInvoiceList',
+          'user_id': _userID,
           'organisasi_id': _organisasiID,
-          'date_from':     dateFrom,
-          'date_to':       dateTo,
+          'date_from': dateFrom,
+          'date_to': dateTo,
         }));
 
     setState(() {
@@ -158,7 +157,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     final isConn = await PrinterHelper.isConnected();
     if (isConn) return true;
 
-    final prefs    = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
     final savedMac = prefs.getString('printer_mac');
     if (savedMac == null) {
       if (mounted) {
@@ -181,7 +180,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       final res = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'trackPrint',
-            'kode':   kode,
+            'kode': kode,
           }));
       if (res.data['success'] == true) {
         return (res.data['count'] as num).toInt();
@@ -195,11 +194,11 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     final dio = ApiService.getDio(token: _token);
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':     'getInvoiceDetail',
+          'action': 'getInvoiceDetail',
           'invoice_id': invoiceId,
         }));
     return {
-      'items':      List<Map<String, dynamic>>.from(res.data['data']),
+      'items': List<Map<String, dynamic>>.from(res.data['data']),
       'keterangan': res.data['keterangan'] ?? '',
     };
   }
@@ -240,8 +239,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Text(
                   'Print Ulang — ${invoice['kode']}',
                   style: const TextStyle(
@@ -251,14 +250,13 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
               const Divider(),
               // Pilihan
               ListTile(
-                leading: const Icon(Icons.receipt_long,
-                    color: Color(0xFF1D273B)),
+                leading:
+                    const Icon(Icons.receipt_long, color: Color(0xFF1D273B)),
                 title: const Text('Customer Copy'),
                 subtitle: const Text('Struk untuk pelanggan'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _doPrint(invoice,
-                      printCustomer: true, printKitchen: false);
+                  _doPrint(invoice, printCustomer: true, printKitchen: false);
                 },
               ),
               ListTile(
@@ -267,19 +265,16 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                 subtitle: const Text('Struk untuk dapur'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _doPrint(invoice,
-                      printCustomer: false, printKitchen: true);
+                  _doPrint(invoice, printCustomer: false, printKitchen: true);
                 },
               ),
               ListTile(
-                leading:
-                    const Icon(Icons.print_rounded, color: Colors.green),
+                leading: const Icon(Icons.print_rounded, color: Colors.green),
                 title: const Text('Customer + Kitchen'),
                 subtitle: const Text('Print dua-duanya'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _doPrint(invoice,
-                      printCustomer: true, printKitchen: true);
+                  _doPrint(invoice, printCustomer: true, printKitchen: true);
                 },
               ),
               const SizedBox(height: 8),
@@ -313,9 +308,13 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
         _trackPrint(invoice['kode']),
       ]);
       final fetchResult = results[0] as Map<String, dynamic>;
-      final items        = fetchResult['items'] as List<Map<String, dynamic>>;
+      final items = fetchResult['items'] as List<Map<String, dynamic>>;
       final keteranganTrx = fetchResult['keterangan'] as String;
-      final copyCount    = results[1] as int;
+      // Print dari invoice list SELALU reprint — pastikan ribbon muncul.
+      // trackPrint sudah increment di server; kalau first print POS tidak
+      // track, offset +1 agar copyCount minimal 2 (ribbon selalu tampil).
+      final rawCount = results[1] as int;
+      final copyCount = rawCount < 2 ? 2 : rawCount;
 
       // 3. Siapkan data bersama
       final tanggal = invoice['tanggal'].toString().length >= 16
@@ -325,28 +324,29 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       // 4. Print customer copy
       if (printCustomer) {
         await PrinterHelper.printInvoice(
-          storeName:    _activeStoreName,
+          storeName: _activeStoreName,
           storeAddress: _activeStoreAddress,
-          npwp:         _activeStoreNpwp,
-          invoiceNote:  _activeInvoiceNote,
+          npwp: _activeStoreNpwp,
+          invoiceNote: _activeInvoiceNote,
           invoiceNumber: invoice['kode'],
-          tanggal:      tanggal,
-          kasir:        invoice['kasir'] ?? '',
-          memberNama:   invoice['member'] ?? '',
-          items:        items,
-          gross:        (invoice['gross'] as num).toDouble(),
-          diskon:       (invoice['diskon'] as num).toDouble(),
-          total:        (invoice['total'] as num).toDouble(),
-          dpp:          0,
-          pajak:        0,
-          caraBayar:    invoice['cara_bayar'] ?? '',
+          tanggal: tanggal,
+          kasir: invoice['kasir'] ?? '',
+          memberNama: invoice['member'] ?? '',
+          items: items,
+          gross: (invoice['gross'] as num).toDouble(),
+          diskon: (invoice['diskon'] as num).toDouble(),
+          total: (invoice['total'] as num).toDouble(),
+          dpp: 0,
+          pajak: 0,
+          caraBayar: invoice['cara_bayar'] ?? '',
           nominalBayar: (invoice['bayar'] as num).toDouble(),
-          kembalian:    (invoice['kembalian'] as num).toDouble(),
-          voucherKode:  invoice['voucher_kode'],
-          keterangan:   keteranganTrx,
+          kembalian: (invoice['kembalian'] as num).toDouble(),
+          voucherKode: invoice['voucher_kode'],
+          keterangan: keteranganTrx,
           logoFileName: _logoFileName.isNotEmpty ? _logoFileName : null,
-          logoUrl:      _logoUrl.isNotEmpty ? _logoUrl : null,
-          copyCount:    copyCount,
+          logoUrl: _logoUrl.isNotEmpty ? _logoUrl : null,
+          copyCount: copyCount,
+          salesTipe: invoice['sales_tipe'] ?? '',
         );
       }
 
@@ -358,14 +358,15 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       // 6. Print kitchen copy
       if (printKitchen) {
         await PrinterHelper.printKitchen(
-          storeName:     _activeStoreName,
+          storeName: _activeStoreName,
           invoiceNumber: invoice['kode'],
-          tanggal:       tanggal,
-          kasir:         invoice['kasir'] ?? '',
-          items:         items,
-          total:         (invoice['total'] as num).toDouble(),
-          keterangan:    keteranganTrx,
-          copyCount:     copyCount,
+          tanggal: tanggal,
+          kasir: invoice['kasir'] ?? '',
+          items: items,
+          total: (invoice['total'] as num).toDouble(),
+          keterangan: keteranganTrx,
+          copyCount: copyCount,
+          salesTipe: invoice['sales_tipe'] ?? '',
         );
       }
 
@@ -411,11 +412,11 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     try {
       final res = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':        'kirimWA',
-            'number':        invoice['kode'],
-            'store_id':      _activeStoreID,
+            'action': 'kirimWA',
+            'number': invoice['kode'],
+            'store_id': _activeStoreID,
             'organisasi_id': _organisasiID,
-            'member_id':     invoice['dim_bp_id'] ?? 0,
+            'member_id': invoice['dim_bp_id'] ?? 0,
           }));
 
       if (mounted) Navigator.pop(context);
@@ -460,11 +461,11 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     try {
       final res = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action':        'kirimEmail',
-            'number':        invoice['kode'],
-            'store_id':      _activeStoreID,
+            'action': 'kirimEmail',
+            'number': invoice['kode'],
+            'store_id': _activeStoreID,
             'organisasi_id': _organisasiID,
-            'member_id':     invoice['dim_bp_id'] ?? 0,
+            'member_id': invoice['dim_bp_id'] ?? 0,
           }));
 
       if (mounted) Navigator.pop(context);
@@ -558,8 +559,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       final res = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'voidInvoice',
-            'id':     invoice['id'],
-            'notes':  notes,
+            'id': invoice['id'],
+            'notes': notes,
             'userID': _userID,
           }));
 
@@ -576,8 +577,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content:
-                  Text(res.data['message'] ?? 'Gagal kirim request void')),
+              content: Text(res.data['message'] ?? 'Gagal kirim request void')),
         );
       }
     } catch (e) {
@@ -665,10 +665,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                           Container(
                                             margin: const EdgeInsets.only(
                                                 bottom: 4),
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                    horizontal: 8,
-                                                    vertical: 2),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 2),
                                             decoration: BoxDecoration(
                                               color: const Color(0xFF1D273B)
                                                   .withOpacity(0.08),
@@ -690,8 +688,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                               ? inv['member']
                                               : 'Tanpa Member',
                                           style: const TextStyle(
-                                              color: Colors.grey,
-                                              fontSize: 12),
+                                              color: Colors.grey, fontSize: 12),
                                         ),
                                         // Baris 4: cara bayar + jam
                                         Text(
@@ -699,8 +696,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                           ' • '
                                           '${inv['tanggal'].toString().length >= 16 ? inv['tanggal'].toString().substring(11, 16) : inv['tanggal'].toString()}',
                                           style: const TextStyle(
-                                              color: Colors.grey,
-                                              fontSize: 12),
+                                              color: Colors.grey, fontSize: 12),
                                         ),
                                         // Baris 5: kasir
                                         if ((inv['kasir'] ?? '').isNotEmpty)
@@ -715,8 +711,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                   ),
                                   // Total + actions
                                   Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.end,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
                                       Text(
                                         'Rp ${CurrencyFormat.format(inv['total'])}',
@@ -734,8 +729,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                             tooltip: _isFnB
                                                 ? 'Print Ulang'
                                                 : 'Print',
-                                            onPressed: () =>
-                                                _handlePrint(inv),
+                                            onPressed: () => _handlePrint(inv),
                                           ),
                                           // WA
                                           if (_waEnabled == 1 &&
@@ -755,8 +749,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                               icon: const Icon(Icons.email,
                                                   color: Colors.orange),
                                               tooltip: 'Kirim Email',
-                                              onPressed: () =>
-                                                  _sendEmail(inv),
+                                              onPressed: () => _sendEmail(inv),
                                             ),
                                           // Request Void
                                           IconButton(
@@ -764,8 +757,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                                 Icons.cancel_outlined,
                                                 color: Colors.red),
                                             tooltip: 'Request Void',
-                                            onPressed: () =>
-                                                _requestVoid(inv),
+                                            onPressed: () => _requestVoid(inv),
                                           ),
                                         ],
                                       ),

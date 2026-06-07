@@ -58,7 +58,7 @@ class PackageDialog extends StatefulWidget {
 }
 
 class _PackageDialogState extends State<PackageDialog> {
-  // ── Isian (checkbox, tidak mandatory) ──
+  // ── Isian (checkbox, wajib pilih minimal 1) ──
   final Set<int> _selectedIsian = {};
 
   // ── Addon single: satu pilihan per grup (key = grupKey string) ──
@@ -162,6 +162,37 @@ class _PackageDialogState extends State<PackageDialog> {
   bool get _hasIsian => _isianList.isNotEmpty;
   bool get _hasAddon => _cachedAddonGroups.isNotEmpty;
 
+  /// Validasi sebelum konfirmasi:
+  /// 1. Kalau ada isian → wajib pilih minimal 1
+  /// 2. Semua grup addon tipe 'single' wajib dipilih
+  bool get _canConfirm {
+    if (_hasIsian && _selectedIsian.isEmpty) return false;
+    for (final entry in _cachedAddonGroups.entries) {
+      final tipe = (entry.value['tipe_pilihan'] as String?) ?? 'multiple';
+      if (tipe == 'single' && !_selectedSingle.containsKey(entry.key)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Kumpulkan semua bagian yang belum dipilih untuk pesan error.
+  List<String> get _bagianBelumDipilih {
+    final result = <String>[];
+    if (_hasIsian && _selectedIsian.isEmpty) result.add('Isian');
+    _cachedAddonGroups.forEach((grupKey, grupData) {
+      final tipe = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
+      if (tipe == 'single' && !_selectedSingle.containsKey(grupKey)) {
+        result.add(
+          (grupData['grup_label'] as String?)?.isNotEmpty == true
+              ? grupData['grup_label'] as String
+              : _capitalize(grupKey),
+        );
+      }
+    });
+    return result;
+  }
+
   /// Kumpulkan semua addon yang dipilih (single + multiple) untuk dikirim ke API
   List<Map<String, dynamic>> get _addonDipilih {
     final result = <Map<String, dynamic>>[];
@@ -207,6 +238,20 @@ class _PackageDialogState extends State<PackageDialog> {
   }
 
   void _onConfirm() {
+    // Validasi: semua grup single wajib dipilih
+    if (!_canConfirm) {
+      final belum = _bagianBelumDipilih.join(', ');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Pilih dulu: $belum'),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
     final isianDipilih = _isianList
         .where((i) => _selectedIsian.contains(i['m_package_isian_id'] as int))
         .map<Map<String, dynamic>>((i) => {
@@ -300,8 +345,9 @@ class _PackageDialogState extends State<PackageDialog> {
     );
   }
 
-  // ── Isian (Checkbox, tidak mandatory) ───────────────────────
+  // ── Isian (Checkbox, wajib pilih minimal 1) ────────────────
   Widget _buildIsianSection() {
+    final belumPilih = _selectedIsian.isEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -310,8 +356,25 @@ class _PackageDialogState extends State<PackageDialog> {
             const Text('Isian',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             const SizedBox(width: 6),
-            Text('(opsional)',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: belumPilih
+                    ? const Color(0xFFFFE4E6) // merah-lt kalau belum dipilih
+                    : const Color(0xFFDCFCE7), // hijau-lt kalau sudah
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                belumPilih ? 'Pilih minimal 1 ✕' : 'Sudah dipilih ✓',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: belumPilih
+                      ? const Color(0xFFBE123C)
+                      : const Color(0xFF15803D),
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 10),
@@ -682,6 +745,7 @@ class _PackageDialogState extends State<PackageDialog> {
 
   // ── Footer ────────────────────────────────────────────────────
   Widget _buildFooter() {
+    final canConfirm = _canConfirm;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
       decoration: BoxDecoration(
@@ -704,12 +768,15 @@ class _PackageDialogState extends State<PackageDialog> {
           Expanded(
             flex: 2,
             child: ElevatedButton.icon(
-              onPressed: _onConfirm,
+              onPressed: canConfirm ? _onConfirm : null,
               icon: const Icon(Icons.add_shopping_cart, size: 18),
               label: const Text('Tambah ke Order'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1D273B),
+                backgroundColor:
+                    canConfirm ? const Color(0xFF1D273B) : Colors.grey.shade400,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey.shade400,
+                disabledForegroundColor: Colors.white70,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),

@@ -1,4 +1,4 @@
-package com.example.mobile_pos
+package com.aibipi.pos
 
 import io.flutter.embedding.android.FlutterActivity
 

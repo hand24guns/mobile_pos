@@ -32,6 +32,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   final _keteranganController = TextEditingController(); // keterangan transaksi
   String _activeVoucher = '';
 
+  // Track pending order yang sedang di-retrieve (null = transaksi baru)
+  int? _activePendingOrderID;
+  String _activePendingLabel = '';
+
   // Untuk inline notes per item: key = item index, value = controller
   final Map<int, TextEditingController> _itemNotesControllers = {};
   // Set of item indices yang sedang expanded (menampilkan input notes)
@@ -262,11 +266,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final number = numberRes.data['number'];
 
       final channelRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({'action': 'getChannels'}));
+          data: FormData.fromMap({
+            'action': 'getChannels',
+            'organisasi_id': organisasiID,
+          }));
       _channels = List<Map<String, dynamic>>.from(channelRes.data['data']);
 
       final caraBayarRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({'action': 'getCaraBayar'}));
+          data: FormData.fromMap({
+            'action': 'getCaraBayar',
+            'organisasi_id': organisasiID,
+          }));
       _caraBayarList =
           List<Map<String, dynamic>>.from(caraBayarRes.data['data']);
 
@@ -655,6 +665,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'action': 'searchProduk',
           'term': sku,
           'organisasi_id': state.organisasiID,
+          'salestipe_id': state.salesTipeID,
         }));
 
     final data = List<Map<String, dynamic>>.from(res.data['data']);
@@ -682,16 +693,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // ============================================================
   Future<void> _insertProduk(String sku) async {
     final state = ref.read(penjualanProvider);
-    final dio   = ApiService.getDio(token: _token);
+    final dio = ApiService.getDio(token: _token);
 
     Map<String, dynamic> cekData;
     try {
       final rawRes = await dio.post(
         '/penjualan.php',
         data: FormData.fromMap({
-          'action':       'cekPackage',
-          'sku':          sku,
+          'action': 'cekPackage',
+          'sku': sku,
           'organisasi_id': state.organisasiID,
+          'salestipe_id': state.salesTipeID,
         }),
         options: Options(responseType: ResponseType.plain),
       );
@@ -725,7 +737,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     }
 
     // is_package dari PHP bisa berupa bool true atau int 1 (TINYINT MySQL)
-    final isPackage = cekData['is_package'] == true || cekData['is_package'] == 1;
+    final isPackage =
+        cekData['is_package'] == true || cekData['is_package'] == 1;
 
     if (isPackage) {
       if (!mounted) return;
@@ -766,6 +779,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'member_id': state.memberID ?? 0,
           'voucher': _activeVoucher,
           'device_token': _deviceToken,
+          'salestipe_id': state.salesTipeID,
         }));
 
     if (res.data['success'] == true) {
@@ -809,6 +823,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'addon': jsonEncode(addonDipilih),
           'addon_harga': addonTotal,
           'keterangan': keterangan,
+          'salestipe_id': state.salesTipeID,
         }));
 
     if (res.data['success'] == true) {
@@ -889,13 +904,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     setState(() => _isLoadingImages = true);
     try {
       final state = ref.read(penjualanProvider);
-      final dio   = ApiService.getDio(token: _token);
+      final dio = ApiService.getDio(token: _token);
 
       final rawRes = await dio.post(
         '/penjualan.php',
         data: FormData.fromMap({
-          'action':       'getImageProducts',
+          'action': 'getImageProducts',
           'organisasi_id': state.organisasiID,
+          'salestipe_id': state.salesTipeID,
         }),
         options: Options(responseType: ResponseType.plain),
       );
@@ -921,7 +937,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                             'nama': p['nama']?.toString() ?? '',
                             'hpj': (p['hpj'] as num? ?? 0).toDouble(),
                             'image': p['image']?.toString() ?? '',
-                            'is_package': p['is_package'] == true || p['is_package'] == 1,
+                            'is_package':
+                                p['is_package'] == true || p['is_package'] == 1,
                           })
                       .where((p) => p['image']!.isNotEmpty)
                       .toList(),
@@ -996,11 +1013,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'number': state.number,
           'sku': item.kode,
           'qty': qty,
+          'packages_notes': item.packagesNotes ?? '',
           'store_id': state.storeID,
           'organisasi_id': state.organisasiID,
           'member_id': state.memberID ?? 0,
           'voucher': _activeVoucher,
           'device_token': _deviceToken,
+          'salestipe_id': state.salesTipeID,
         }));
 
     await _refreshFromApi();
@@ -1444,6 +1463,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                       caraBayar: caraBayar,
                       currentState: state,
                     );
+                    // Hapus pending order dari DB jika transaksi ini berasal dari retrieve pending
+    if (_activePendingOrderID != null) {
+      await _deletePending(_activePendingOrderID!);
+    }
                     _resetTransaksi();
                   },
                   icon: const Icon(Icons.print, size: 18),
@@ -1469,6 +1492,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     );
                     if (mounted) {
                       Navigator.pop(context);
+                      // Hapus pending order dari DB jika transaksi ini berasal dari retrieve pending
+    if (_activePendingOrderID != null) {
+      await _deletePending(_activePendingOrderID!);
+    }
                       _resetTransaksi();
                     }
                   },
@@ -1476,8 +1503,12 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   label: const Text('Print'),
                 ),
               ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   Navigator.pop(context);
+                  // Hapus pending order dari DB jika transaksi ini berasal dari retrieve pending
+    if (_activePendingOrderID != null) {
+      await _deletePending(_activePendingOrderID!);
+    }
                   _resetTransaksi();
                 },
                 style: ElevatedButton.styleFrom(
@@ -1516,7 +1547,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               'organisasi_id': organisasiID,
               'member_id': memberID,
             }))
-        .then((_) {}).catchError((_) {});
+        .then((_) {})
+        .catchError((_) {});
 
     dio
         .post('/penjualan.php',
@@ -1527,7 +1559,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               'organisasi_id': organisasiID,
               'member_id': memberID,
             }))
-        .then((_) {}).catchError((_) {});
+        .then((_) {})
+        .catchError((_) {});
   }
 
   Future<void> _resetTransaksi() async {
@@ -1552,11 +1585,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID:
-              int.parse(_channels.first['dim_salestipe_id'].toString()),
+          salesTipeID: int.parse(_channels.first['dim_salestipe_id'].toString()),
         );
 
-    setState(() => _activeVoucher = '');
+    setState(() {
+      _activeVoucher = '';
+      _activePendingOrderID = null;
+      _activePendingLabel = '';
+    });
     ref.read(penjualanProvider.notifier).setReturSource('');
     _memberController.clear();
     _nominalController.clear();
@@ -1568,6 +1604,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     }
     _itemNotesControllers.clear();
     _expandedNotes.clear();
+    _loadImageProducts();
   }
 
   // ============================================================
@@ -1626,11 +1663,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final storeNpwp = storeRes.data['npwp'] ?? '';
       final invoiceNote = storeRes.data['invoice_note'] ?? '';
       final storeTax = (storeRes.data['tax'] as num? ?? 0).toDouble();
+      final logoFileName = storeRes.data['logo_file_name'] ?? '';
+      final logoUrl = storeRes.data['logo_url'] ?? '';
       // isFnb: dibaca dari state yang sudah di-set saat load awal
       // (jasa_perusahaan == 3 di dim_organisasi → FnB/resto)
       final isFnb = _isFnb;
 
-      // ── Siapkan items ────────────────────────────────────────
+      // ── Keterangan transaksi dari controller ─────────────────
+      final keteranganTrx = _keteranganController.text.trim();
+
+      // ── Siapkan items — include keterangan per item ──────────
       final items = currentState.items
           .map((item) => {
                 'nama': item.nama,
@@ -1640,6 +1682,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 'diskon_persen': item.diskonPersen,
                 'diskon_nominal': item.diskonNominal,
                 'packages_notes': item.packagesNotes ?? '',
+                'keterangan': item.keterangan ?? '',
               })
           .toList();
 
@@ -1682,6 +1725,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           npwp: storeNpwp,
           invoiceNote: invoiceNote,
           salesTipe: salesTipeNama.isNotEmpty ? salesTipeNama : null,
+          keterangan: keteranganTrx.isNotEmpty ? keteranganTrx : null,
+          logoFileName: logoFileName.isNotEmpty ? logoFileName : null,
+          logoUrl: logoUrl.isNotEmpty ? logoUrl : null,
         );
 
         if (mounted) {
@@ -1732,6 +1778,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           voucherKode: _activeVoucher.isNotEmpty ? _activeVoucher : null,
           storeTax: storeTax,
           salesTipe: salesTipeNama.isNotEmpty ? salesTipeNama : null,
+          keterangan: keteranganTrx.isNotEmpty ? keteranganTrx : null,
+          logoFileName: logoFileName.isNotEmpty ? logoFileName : null,
+          logoUrl: logoUrl.isNotEmpty ? logoUrl : null,
         );
 
         if (mounted) {
@@ -1897,6 +1946,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           }));
       final storeName = storeRes.data['nama'] ?? '';
 
+      final keteranganTrx = _keteranganController.text.trim();
+
       final items = currentState.items
           .map((item) => {
                 'nama': item.nama,
@@ -1906,6 +1957,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 'diskon_persen': item.diskonPersen,
                 'diskon_nominal': item.diskonNominal,
                 'packages_notes': item.packagesNotes ?? '',
+                'keterangan': item.keterangan ?? '',
               })
           .toList();
 
@@ -1920,6 +1972,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         kasir: kasirNama,
         items: items,
         total: currentState.total,
+        keterangan: keteranganTrx.isNotEmpty ? keteranganTrx : null,
       );
 
       if (mounted) {
@@ -1949,15 +2002,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           .showSnackBar(const SnackBar(content: Text('Belum ada produk')));
       return;
     }
-    if (state.memberID == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Member harus diisi untuk pending payment')),
-      );
-      return;
-    }
 
-    final labelController = TextEditingController();
+    // Tampilkan dialog — untuk update, field label sudah terisi nama sebelumnya
+    final labelController = TextEditingController(
+      text: _activePendingOrderID != null ? _activePendingLabel : '',
+    );
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -1985,6 +2034,18 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     if (confirm != true) return;
 
+    await _doSimpanPending(
+      state: state,
+      label: labelController.text.trim(),
+      pendingOrderID: _activePendingOrderID,
+    );
+  }
+
+  Future<void> _doSimpanPending({
+    required PenjualanState state,
+    required String? label,
+    required int? pendingOrderID,
+  }) async {
     final session = await SessionService.getSession();
     final dio = ApiService.getDio(token: _token);
 
@@ -1996,19 +2057,25 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           'organisasi_id': state.organisasiID,
           'member_id': state.memberID ?? 0,
           'user_id': session['user_id'],
-          'label': labelController.text.trim(),
+          'label': label ?? '',
           'device_token': _deviceToken,
+          'salestipe_id': state.salesTipeID,
+          'keterangan': _keteranganController.text.trim(),
+          if (pendingOrderID != null) 'pending_order_id': pendingOrderID,
         }));
 
     if (res.data['success'] == true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Order disimpan sebagai pending'),
+          SnackBar(
+            content: Text(pendingOrderID != null
+                ? 'Pending order diperbarui'
+                : 'Order disimpan sebagai pending'),
             backgroundColor: Colors.orange,
           ),
         );
       }
+      setState(() => _activePendingOrderID = null);
       await _resetTransaksi();
     } else {
       if (mounted) {
@@ -2079,10 +2146,19 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: Text(
-                          '${order['member']} • ${order['created_date'].toString().substring(0, 16)}'),
+                          '${(order['member'] as String?)?.isNotEmpty == true ? order['member'] : 'Tanpa Member'} • ${order['created_date'].toString().substring(0, 16)}'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          // Print pending
+                          IconButton(
+                            icon: const Icon(Icons.print_outlined,
+                                color: Colors.blueGrey),
+                            tooltip: 'Print Struk Pending',
+                            onPressed: () async {
+                              await _printPendingOrder(order);
+                            },
+                          ),
                           IconButton(
                             icon: const Icon(Icons.play_circle,
                                 color: Colors.green),
@@ -2090,7 +2166,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                               Navigator.pop(context);
                               await _retrievePending(
                                 int.parse(order['id'].toString()),
-                                order['member'],
+                                order['member'] as String? ?? '',
                               );
                             },
                           ),
@@ -2154,11 +2230,41 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         }));
 
     if (res.data['success'] == true) {
-      _memberController.text = res.data['member'];
-      ref.read(penjualanProvider.notifier).setMember(
-            int.parse(res.data['member_id'].toString()),
-            member,
-          );
+      // Set member
+      final memberID = res.data['member_id'];
+      if (memberID != null && int.parse(memberID.toString()) > 0) {
+        _memberController.text = res.data['member'] ?? '';
+        ref.read(penjualanProvider.notifier).setMember(
+              int.parse(memberID.toString()),
+              member,
+            );
+      } else {
+        _memberController.clear();
+        ref.read(penjualanProvider.notifier).setMember(null, '');
+      }
+
+      // Restore keterangan
+      final keterangan = res.data['keterangan'] as String? ?? '';
+      _keteranganController.text = keterangan;
+
+      // Restore salestipe / channel
+      final salestipeID = res.data['salestipe_id'];
+      if (salestipeID != null) {
+        final stipeID = int.parse(salestipeID.toString());
+        if (stipeID > 0) {
+          ref.read(penjualanProvider.notifier).setSalesTipe(stipeID);
+          // Reload grid image agar harga sesuai channel order ini
+          _loadImageProducts();
+        }
+      }
+
+      // Update number + device_token di temp_invoice (sudah dilakukan di PHP)
+      // Simpan ID pending order yang sedang aktif agar bisa di-update (bukan insert baru)
+      setState(() {
+        _activePendingOrderID = salesOrderID;
+        _activePendingLabel = res.data['order_nama'] as String? ?? '';
+      });
+
       await _refreshFromApi();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2181,6 +2287,309 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   // ============================================================
+  // PRINT PENDING ORDER
+  // Jika FnB: tampilkan bottom sheet pilih Customer/Kitchen/Keduanya
+  // Jika non-FnB: langsung print customer copy (sama seperti penjualan normal)
+  // ============================================================
+  Future<void> _printPendingOrder(Map<String, dynamic> order) async {
+    if (_isFnb) {
+      // FnB → tampilkan pilihan print seperti penjualan normal
+      await _showPendingPrintSheet(order);
+    } else {
+      // Non-FnB → langsung print customer copy
+      await _doPrintPendingCustomer(order);
+    }
+  }
+
+  // ── Bottom sheet pilih Customer / Kitchen / Keduanya untuk pending ──
+  Future<void> _showPendingPrintSheet(Map<String, dynamic> order) async {
+    final invoiceLabel = (order['label'] as String? ?? '').isNotEmpty
+        ? order['label'] as String
+        : order['kode'] as String;
+
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Text(
+                  'Print Pending — $invoiceLabel',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.receipt_long, color: Color(0xFF1D273B)),
+                title: const Text('Customer Copy'),
+                subtitle: const Text('Struk estimasi untuk pelanggan'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _doPrintPendingCustomer(order);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.kitchen, color: Colors.orange),
+                title: const Text('Kitchen Copy'),
+                subtitle: const Text('Struk order untuk dapur'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _doPrintPendingKitchen(order);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.print_rounded, color: Colors.green),
+                title: const Text('Customer + Kitchen'),
+                subtitle: const Text('Print dua-duanya'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _doPrintPendingBoth(order);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Helper: ambil data store + items pending ──────────────────
+  Future<Map<String, dynamic>?> _fetchPendingPrintData(
+      Map<String, dynamic> order) async {
+    // Pastikan printer terhubung
+    final connected = await PrinterHelper.isConnected();
+    if (!connected) {
+      final prefs = await SharedPreferences.getInstance();
+      final savedMac = prefs.getString('printer_mac');
+      if (savedMac == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Belum ada printer terhubung. Buka pengaturan printer.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return null;
+      }
+      await PrinterHelper.connect(savedMac);
+    }
+
+    final salesOrderID = int.parse(order['id'].toString());
+    final state = ref.read(penjualanProvider);
+    final dio = ApiService.getDio(token: _token);
+
+    final itemsRes = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getPendingOrderItems',
+          'sales_order_id': salesOrderID,
+        }));
+
+    if (itemsRes.data['success'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Gagal ambil data item'),
+              backgroundColor: Colors.red),
+        );
+      }
+      return null;
+    }
+
+    final storeRes = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getStoreData',
+          'store_id': state.storeID,
+        }));
+
+    // Gunakan salestipe_nama & keterangan dari header order (bukan dari state aktif)
+    final salesTipeNama = (itemsRes.data['salestipe_nama'] as String? ?? '').isNotEmpty
+        ? itemsRes.data['salestipe_nama'] as String
+        : (_channels.isNotEmpty
+            ? (_channels
+                    .firstWhere(
+                      (c) =>
+                          int.parse(c['dim_salestipe_id'].toString()) ==
+                          (itemsRes.data['salestipe_id'] as num? ?? 0).toInt(),
+                      orElse: () => {'nama': ''},
+                    )['nama']
+                    ?.toString() ??
+                '')
+            : '');
+    final keteranganOrder = itemsRes.data['keterangan_order'] as String? ?? '';
+
+    final kasirNama =
+        (await SessionService.getSession())['nama'] as String? ?? '';
+    final tanggal = DateTime.now().toString().substring(0, 16);
+    final invoiceLabel = (order['label'] as String? ?? '').isNotEmpty
+        ? order['label'] as String
+        : order['kode'] as String;
+
+    return {
+      'items': List<Map<String, dynamic>>.from(itemsRes.data['data']),
+      'estimasiTotal': (itemsRes.data['total'] as num? ?? 0).toDouble(),
+      'storeName': storeRes.data['nama'] ?? '',
+      'storeAddress': storeRes.data['alamat'] ?? '',
+      'storeNpwp': storeRes.data['npwp'] ?? '',
+      'invoiceNote': storeRes.data['invoice_note'] ?? '',
+      'logoFileName': storeRes.data['logo_file_name'] ?? '',
+      'logoUrl': storeRes.data['logo_url'] ?? '',
+      'salesTipeNama': salesTipeNama,
+      'kasirNama': kasirNama,
+      'tanggal': tanggal,
+      'invoiceLabel': invoiceLabel,
+      'memberNama': order['member'] as String? ?? '',
+      'keterangan': keteranganOrder,
+    };
+  }
+
+  // ── Print customer copy pending ───────────────────────────────
+  Future<void> _doPrintPendingCustomer(Map<String, dynamic> order) async {
+    try {
+      final d = await _fetchPendingPrintData(order);
+      if (d == null) return;
+
+      await PrinterHelper.printPendingOrder(
+        storeName: d['storeName'],
+        storeAddress: d['storeAddress'],
+        invoiceNumber: d['invoiceLabel'],
+        tanggal: d['tanggal'],
+        kasir: d['kasirNama'],
+        memberNama: d['memberNama'],
+        items: d['items'],
+        estimasiTotal: d['estimasiTotal'],
+        npwp: (d['storeNpwp'] as String).isNotEmpty ? d['storeNpwp'] : null,
+        invoiceNote: (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
+        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        logoFileName: (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
+        logoUrl: (d['logoUrl'] as String).isNotEmpty ? d['logoUrl'] : null,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Print Customer pending berhasil!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Gagal print: $e')));
+      }
+    }
+  }
+
+  // ── Print kitchen copy pending ────────────────────────────────
+  Future<void> _doPrintPendingKitchen(Map<String, dynamic> order) async {
+    try {
+      final d = await _fetchPendingPrintData(order);
+      if (d == null) return;
+
+      await PrinterHelper.printKitchen(
+        storeName: d['storeName'],
+        invoiceNumber: d['invoiceLabel'],
+        tanggal: d['tanggal'],
+        kasir: d['kasirNama'],
+        memberNama: d['memberNama'],
+        items: d['items'],
+        total: d['estimasiTotal'],
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
+        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Print Kitchen pending berhasil!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Gagal print kitchen: $e')));
+      }
+    }
+  }
+
+  // ── Print customer + kitchen pending sekaligus ────────────────
+  Future<void> _doPrintPendingBoth(Map<String, dynamic> order) async {
+    try {
+      final d = await _fetchPendingPrintData(order);
+      if (d == null) return;
+
+      // Customer copy
+      await PrinterHelper.printPendingOrder(
+        storeName: d['storeName'],
+        storeAddress: d['storeAddress'],
+        invoiceNumber: d['invoiceLabel'],
+        tanggal: d['tanggal'],
+        kasir: d['kasirNama'],
+        memberNama: d['memberNama'],
+        items: d['items'],
+        estimasiTotal: d['estimasiTotal'],
+        npwp: (d['storeNpwp'] as String).isNotEmpty ? d['storeNpwp'] : null,
+        invoiceNote: (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
+        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        logoFileName: (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
+        logoUrl: (d['logoUrl'] as String).isNotEmpty ? d['logoUrl'] : null,
+      );
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Kitchen copy
+      await PrinterHelper.printKitchen(
+        storeName: d['storeName'],
+        invoiceNumber: d['invoiceLabel'],
+        tanggal: d['tanggal'],
+        kasir: d['kasirNama'],
+        memberNama: d['memberNama'],
+        items: d['items'],
+        total: d['estimasiTotal'],
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
+        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Print Customer + Kitchen pending berhasil!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Gagal print: $e')));
+      }
+    }
+  }
+
+  // ============================================================
   // RESPONSIVE HELPERS
   // ============================================================
   // Breakpoint berdasarkan lebar layar (dp):
@@ -2189,25 +2598,65 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   //   600–719 → tablet 7" landscape
   //   < 600  → tablet 7" portrait     → stacked layout
   double get _screenWidth => MediaQuery.of(context).size.width;
-  bool get _isSmallTablet => _screenWidth < 800;
-  bool get _isTinyTablet  => _screenWidth < 600;
+  bool get _isLandscape =>
+      MediaQuery.of(context).orientation == Orientation.landscape;
+
+  // _bodyHeight diisi oleh LayoutBuilder (constraints.maxHeight) pada
+  // _buildSideBySideLayout / _buildStackedLayout.
+  // Nilainya = tinggi setelah SafeArea + AppBar sudah dikurangi —
+  // termasuk 3-button navbar (48dp) yang juga sudah dipotong SafeArea.
+  // Default 480 agar helpers tidak crash sebelum LayoutBuilder pertama kali build.
+  double _bodyHeight = 480;
+
+  // Tiny: body < 420dp (7" landscape, 3-btn navbar → body ~390dp)
+  bool get _isTinyTablet =>
+      _isLandscape ? _bodyHeight < 420 : _screenWidth < 600;
+
+  // Small: body < 520dp (7–9" landscape, gesture nav → body ~440–480dp)
+  bool get _isSmallTablet =>
+      _isLandscape ? _bodyHeight < 520 : _screenWidth < 900;
+
+  // Compact header: aktif di landscape kecil/sedang, termasuk 3-btn navbar
+  // Threshold 500 menangkap: 7" gesture (body ~440dp) DAN 7" 3-btn (body ~390dp)
+  // dan aman untuk 10" (body ~580dp+) yang tidak butuh compact mode.
+  bool get _isCompactHeader => _isLandscape && _bodyHeight < 500;
 
   /// Lebar kolom kanan (cart + summary)
   double get _rightPanelWidth {
-    if (_isTinyTablet) return _screenWidth * 0.46;
-    if (_isSmallTablet) return _screenWidth * 0.42;
-    return _screenWidth * 0.38;
+    if (_isTinyTablet) return _screenWidth * 0.44;
+    if (_isSmallTablet) return _screenWidth * 0.40;
+    return _screenWidth * 0.36;
   }
 
   /// Padding umum untuk container (header, summary)
-  EdgeInsets get _panelPadding =>
-      EdgeInsets.all(_isTinyTablet ? 8 : _isSmallTablet ? 10 : 12);
+  EdgeInsets get _panelPadding => EdgeInsets.all(_isTinyTablet
+      ? 6
+      : _isSmallTablet
+          ? 8
+          : 12);
+
+  /// Padding ringkas untuk mode compact
+  EdgeInsets get _compactPadding => const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 4,
+      );
 
   /// Font size label utama (Total, store name, dsb.)
-  double get _labelFontSize => _isTinyTablet ? 13 : _isSmallTablet ? 14 : 16;
+  double get _labelFontSize => _isTinyTablet
+      ? 12
+      : _isSmallTablet
+          ? 13
+          : 15;
+
+  /// Font size sekunder (kode, harga, grey text)
+  double get _smallFontSize => _isTinyTablet ? 10 : 11;
 
   /// Tinggi tombol aksi (BAYAR, PENDING)
-  double get _buttonHeight => _isTinyTablet ? 40 : _isSmallTablet ? 44 : 48;
+  double get _buttonHeight => _isTinyTablet
+      ? 34
+      : _isSmallTablet
+          ? 38
+          : 44;
 
   /// Jumlah kolom pada grid gambar produk
   int get _gridColumns {
@@ -2269,74 +2718,30 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           ),
         ],
       ),
-      body: _isTinyTablet
-          // ── LAYOUT STACKED (tablet 7" portrait < 600dp) ───────────
-          ? Column(
-              children: [
-                _buildHeader(state),
-                Expanded(
-                  child: _buildImageGrid(),
-                ),
-                Container(height: 1, color: Colors.grey.shade300),
-                SizedBox(
-                  height: MediaQuery.of(context).size.height * 0.44,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: RefreshIndicator(
-                          onRefresh: _checkShiftStillActive,
-                          color: const Color(0xFF1D273B),
-                          child: _buildCart(state),
-                        ),
-                      ),
-                      Container(height: 1, color: Colors.grey.shade300),
-                      _buildSummaryScrollable(state),
-                    ],
-                  ),
-                ),
-              ],
-            )
-          // ── LAYOUT SIDE-BY-SIDE (tablet 7" landscape ke atas) ────
-          : Row(
-              children: [
-                // ── KOLOM KIRI — identitas + product image grid ──
-                Expanded(
-                  child: Column(
-                    children: [
-                      _buildHeader(state),
-                      Expanded(
-                        child: _buildImageGrid(),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(width: 1, color: Colors.grey.shade300),
-                // ── KOLOM KANAN — cart list + summary ────────────
-                SizedBox(
-                  width: _rightPanelWidth,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: RefreshIndicator(
-                          onRefresh: _checkShiftStillActive,
-                          color: const Color(0xFF1D273B),
-                          child: _buildCart(state),
-                        ),
-                      ),
-                      Container(height: 1, color: Colors.grey.shade300),
-                      _buildSummaryScrollable(state),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+      body: SafeArea(
+        // SafeArea memastikan konten tidak tertutup navbar/status bar
+        // di semua orientasi dan semua jenis navigation (3-button maupun gesture)
+        child: _isLandscape
+            // ── LAYOUT SIDE-BY-SIDE (landscape) ─────────────────
+            ? _buildSideBySideLayout(state)
+            // ── LAYOUT STACKED (portrait) ────────────────────────
+            : _buildStackedLayout(state),
+      ),
     );
   }
 
   // ============================================================
   // HEADER (store info, channel, member, sku search)
+  // Mode compact: aktif di landscape kecil/sedang — field di susun
+  // horizontal 2-kolom agar tinggi header ≤ ~140dp
   // ============================================================
   Widget _buildHeader(PenjualanState state) {
+    if (_isCompactHeader) return _buildHeaderCompact(state);
+    return _buildHeaderFull(state);
+  }
+
+  // ── FULL HEADER (portrait / tablet besar) ───────────────────
+  Widget _buildHeaderFull(PenjualanState state) {
     return Container(
       color: Colors.white,
       padding: _panelPadding,
@@ -2384,10 +2789,31 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 child: Text(c['nama']),
               );
             }).toList(),
-            onChanged: (val) {
+            onChanged: (val) async {
               if (val != null) {
                 ref.read(penjualanProvider.notifier).setSalesTipe(val);
               }
+
+              // Recalculate harga cart jika sudah ada item
+              final state = ref.read(penjualanProvider);
+              if (state.items.isNotEmpty) {
+                try {
+                  final dio = ApiService.getDio(token: _token);
+                  await dio.post('/penjualan.php',
+                      data: FormData.fromMap({
+                        'action': 'recalculateChannel',
+                        'number': state.number,
+                        'salestipe_id': val,
+                        'store_id': state.storeID,
+                        'organisasi_id': state.organisasiID,
+                        'device_token': _deviceToken,
+                      }));
+                  await _refreshFromApi();
+                } catch (_) {}
+              }
+
+              // Reload grid produk agar harga tile ikut berubah
+              _loadImageProducts();
             },
           ),
           const SizedBox(height: 8),
@@ -2530,8 +2956,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             decoration: const InputDecoration(
               labelText: 'Keterangan transaksi (opsional)',
               border: OutlineInputBorder(),
-              contentPadding:
-                  EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               isDense: true,
               prefixIcon: Icon(Icons.notes_outlined, size: 18),
             ),
@@ -2555,6 +2980,287 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               ),
             ),
             onSubmitted: (val) => _searchProduk(val.trim()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── COMPACT HEADER (landscape kecil/sedang ≤ 700dp height) ──
+  // Layout 2-kolom agar total tinggi header ~120-140dp
+  Widget _buildHeaderCompact(PenjualanState state) {
+    final p = _compactPadding;
+    final inputDeco = InputDecoration(
+      border: const OutlineInputBorder(),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      isDense: true,
+    );
+
+    return Container(
+      color: Colors.white,
+      padding: p,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Baris A: Store | No.Invoice | Channel ──
+          Row(
+            children: [
+              // Store + Invoice (compact inline)
+              Expanded(
+                flex: 2,
+                child: Row(
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(state.storeName,
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: _labelFontSize),
+                            overflow: TextOverflow.ellipsis),
+                        Text(state.number,
+                            style: TextStyle(
+                                fontSize: _smallFontSize,
+                                color: Colors.grey)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Channel dropdown
+              Expanded(
+                flex: 3,
+                child: DropdownButtonFormField<int>(
+                  initialValue: state.salesTipeID,
+                  decoration: inputDeco.copyWith(labelText: 'Channel'),
+                  style: TextStyle(
+                      fontSize: _labelFontSize, color: Colors.black87),
+                  items: _channels.map((c) {
+                    return DropdownMenuItem<int>(
+                      value: int.parse(c['dim_salestipe_id'].toString()),
+                      child: Text(c['nama'],
+                          style: TextStyle(fontSize: _labelFontSize)),
+                    );
+                  }).toList(),
+                  onChanged: (val) async {
+                    if (val != null) {
+                      ref.read(penjualanProvider.notifier).setSalesTipe(val);
+                    }
+                    final state = ref.read(penjualanProvider);
+                    if (state.items.isNotEmpty) {
+                      try {
+                        final dio = ApiService.getDio(token: _token);
+                        await dio.post('/penjualan.php',
+                            data: FormData.fromMap({
+                              'action': 'recalculateChannel',
+                              'number': state.number,
+                              'salestipe_id': val,
+                              'store_id': state.storeID,
+                              'organisasi_id': state.organisasiID,
+                              'device_token': _deviceToken,
+                            }));
+                        await _refreshFromApi();
+                      } catch (_) {}
+                    }
+                    _loadImageProducts();
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+
+          // ── Baris B: Member | Voucher | Retur ──
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _memberController,
+                  style: TextStyle(fontSize: _labelFontSize),
+                  decoration: inputDeco.copyWith(
+                    labelText: 'Member',
+                    prefixIcon: state.memberID != null
+                        ? IconButton(
+                            icon: const Icon(Icons.close,
+                                size: 16, color: Colors.red),
+                            tooltip: 'Hapus member',
+                            onPressed: () {
+                              _memberController.clear();
+                              ref
+                                  .read(penjualanProvider.notifier)
+                                  .setMember(null, '');
+                            },
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.person_add,
+                                size: 16, color: Color(0xFF1D273B)),
+                            tooltip: 'Tambah member baru',
+                            onPressed: _showAddMemberSheet,
+                          ),
+                    suffixIcon: const Icon(Icons.search, size: 16),
+                  ),
+                  onSubmitted: (val) async {
+                    if (val.isEmpty) return;
+                    final dio = ApiService.getDio(token: _token);
+                    final res = await dio.post('/penjualan.php',
+                        data: FormData.fromMap({
+                          'action': 'searchMember',
+                          'term': val,
+                          'organisasi_id': state.organisasiID,
+                        }));
+                    final data =
+                        List<Map<String, dynamic>>.from(res.data['data']);
+                    if (data.isEmpty) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Member tidak ditemukan')),
+                        );
+                      }
+                      return;
+                    }
+                    if (mounted) {
+                      showModalBottomSheet(
+                        context: context,
+                        builder: (_) => ListView.builder(
+                          itemCount: data.length,
+                          itemBuilder: (_, i) {
+                            final m = data[i];
+                            return ListTile(
+                              leading: const Icon(Icons.person),
+                              title: Text(m['nama']),
+                              subtitle: Text(m['telp']),
+                              onTap: () {
+                                Navigator.pop(context);
+                                _memberController.text =
+                                    '${m['nama']} - ${m['telp']}';
+                                ref.read(penjualanProvider.notifier).setMember(
+                                      int.parse(m['dim_bp_id'].toString()),
+                                      m['nama'],
+                                    );
+                              },
+                            );
+                          },
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Voucher — icon only jika tiny
+              Stack(
+                children: [
+                  _isTinyTablet
+                      ? IconButton(
+                          icon: Icon(
+                            Icons.confirmation_number_outlined,
+                            size: 22,
+                            color: _activeVoucher.isNotEmpty
+                                ? Colors.indigo
+                                : Colors.grey.shade600,
+                          ),
+                          tooltip: 'Voucher',
+                          onPressed: _showVoucherDialog,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                              minWidth: 36, minHeight: 36),
+                        )
+                      : OutlinedButton.icon(
+                          onPressed: _showVoucherDialog,
+                          icon: const Icon(
+                              Icons.confirmation_number_outlined,
+                              size: 16),
+                          label: const Text('Voucher'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 8),
+                            foregroundColor: _activeVoucher.isNotEmpty
+                                ? Colors.indigo
+                                : null,
+                            side: _activeVoucher.isNotEmpty
+                                ? const BorderSide(color: Colors.indigo)
+                                : null,
+                            textStyle: TextStyle(fontSize: _smallFontSize),
+                          ),
+                        ),
+                  if (_activeVoucher.isNotEmpty)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: Colors.indigo,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 4),
+              // Retur — icon only jika tiny
+              _isTinyTablet
+                  ? IconButton(
+                      icon: const Icon(Icons.assignment_return_outlined,
+                          size: 22, color: Colors.red),
+                      tooltip: 'Retur',
+                      onPressed: _showReturDialog,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints(minWidth: 36, minHeight: 36),
+                    )
+                  : OutlinedButton.icon(
+                      onPressed: _showReturDialog,
+                      icon: const Icon(Icons.assignment_return_outlined,
+                          size: 16),
+                      label: const Text('Retur'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 8),
+                        textStyle: TextStyle(fontSize: _smallFontSize),
+                      ),
+                    ),
+            ],
+          ),
+          const SizedBox(height: 5),
+
+          // ── Baris C: Keterangan | SKU Search (2-kolom) ──
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _keteranganController,
+                  style: TextStyle(fontSize: _labelFontSize),
+                  decoration: inputDeco.copyWith(
+                    labelText: 'Keterangan',
+                    prefixIcon: const Icon(Icons.notes_outlined, size: 16),
+                  ),
+                  maxLines: 1,
+                  textInputAction: TextInputAction.done,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: TextField(
+                  controller: _skuController,
+                  style: TextStyle(fontSize: _labelFontSize),
+                  decoration: inputDeco.copyWith(
+                    labelText: 'Cari produk (nama / SKU)',
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.search, size: 18),
+                      onPressed: () =>
+                          _searchProduk(_skuController.text.trim()),
+                    ),
+                  ),
+                  onSubmitted: (val) => _searchProduk(val.trim()),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -2766,7 +3472,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                                   decoration: BoxDecoration(
                                     color: Colors.blue.shade50,
                                     borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: Colors.blue.shade200),
+                                    border:
+                                        Border.all(color: Colors.blue.shade200),
                                   ),
                                   child: const Text('Package',
                                       style: TextStyle(
@@ -2790,7 +3497,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                           onPressed: () => _updateQty(i, item.qty - 1),
                         ),
                         Text('${item.qty}',
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
                         IconButton(
                           icon: const Icon(Icons.add_circle_outline),
                           onPressed: () => _updateQty(i, item.qty + 1),
@@ -2802,7 +3510,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text('Rp ${CurrencyFormat.format(item.subtotal)}',
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -2853,8 +3562,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                             horizontal: 10, vertical: 6),
                         isDense: true,
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.check, size: 18,
-                              color: Color(0xFF1D273B)),
+                          icon: const Icon(Icons.check,
+                              size: 18, color: Color(0xFF1D273B)),
                           onPressed: () async {
                             final ket = notesCtrl.text.trim();
                             await _updateItemKeterangan(i, ket);
@@ -2876,8 +3585,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     padding: const EdgeInsets.only(top: 2, left: 2),
                     child: Row(
                       children: [
-                        Icon(Icons.notes, size: 13,
-                            color: Colors.amber.shade700),
+                        Icon(Icons.notes,
+                            size: 13, color: Colors.amber.shade700),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -2902,24 +3611,140 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   // ============================================================
-  // SUMMARY SCROLLABLE WRAPPER
-  // Membungkus _buildSummary agar tidak ketimpa virtual keyboard.
-  // Ketika keyboard muncul, summary otomatis bisa di-scroll ke atas
-  // sehingga field Nominal Bayar & tombol BAYAR tetap terlihat.
+  // LAYOUT STACKED — portrait / layar sempit (< 600dp)
+  // Menggunakan LayoutBuilder agar tinggi panel bawah dihitung
+  // dari sisa ruang yang benar-benar tersedia (sudah dikurangi
+  // SafeArea + AppBar), bukan dari size.height mentah.
   // ============================================================
-  Widget _buildSummaryScrollable(PenjualanState state) {
+  Widget _buildStackedLayout(PenjualanState state) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // constraints.maxHeight = tinggi yang tersedia setelah SafeArea + AppBar
+        final availableHeight = constraints.maxHeight;
+        if (_bodyHeight != availableHeight) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _bodyHeight = availableHeight);
+          });
+        }
+        // Panel bawah (cart + summary) diberi 44% dari ruang yang tersedia
+        final bottomPanelHeight = availableHeight * 0.44;
+
+        return Column(
+          children: [
+            _buildHeader(state),
+            Expanded(
+              child: _buildImageGrid(),
+            ),
+            Container(height: 1, color: Colors.grey.shade300),
+            SizedBox(
+              height: bottomPanelHeight,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: _checkShiftStillActive,
+                      color: const Color(0xFF1D273B),
+                      child: _buildCart(state),
+                    ),
+                  ),
+                  Container(height: 1, color: Colors.grey.shade300),
+                  _buildSummaryScrollable(state, availableHeight),
+                  Container(height: 1, color: Colors.grey.shade300),
+                  _buildActionButtons(state),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ============================================================
+  // LAYOUT SIDE-BY-SIDE — landscape (semua ukuran)
+  // Menggunakan LayoutBuilder agar summary panel kanan tidak
+  // overflow ke bawah navbar saat di landscape dengan 3-button nav.
+  // Di layar kecil (7") header compact aktif sehingga product grid
+  // mendapat ruang yang cukup untuk terlihat.
+  // ============================================================
+  Widget _buildSideBySideLayout(PenjualanState state) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableHeight = constraints.maxHeight;
+        // Isi _bodyHeight agar _isTinyTablet / _isSmallTablet / _isCompactHeader
+        // pakai nilai yang sudah dikurangi AppBar + SafeArea (termasuk navbar).
+        if (_bodyHeight != availableHeight) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _bodyHeight = availableHeight);
+          });
+        }
+
+        return Row(
+          children: [
+            // ── KOLOM KIRI — identitas + product image grid ──
+            Expanded(
+              child: Column(
+                children: [
+                  _buildHeader(state),
+                  Expanded(
+                    child: _buildImageGrid(),
+                  ),
+                ],
+              ),
+            ),
+            Container(width: 1, color: Colors.grey.shade300),
+            // ── KOLOM KANAN — cart list + summary + action buttons ──
+            SizedBox(
+              width: _rightPanelWidth,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: _checkShiftStillActive,
+                      color: const Color(0xFF1D273B),
+                      child: _buildCart(state),
+                    ),
+                  ),
+                  Container(height: 1, color: Colors.grey.shade300),
+                  _buildSummaryScrollable(state, availableHeight),
+                  Container(height: 1, color: Colors.grey.shade300),
+                  // Tombol PENDING + BAYAR dipinned di sini — selalu terlihat
+                  // meskipun summary panjang / layar landscape kecil / 3-button navbar
+                  _buildActionButtons(state),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ============================================================
+  // SUMMARY SCROLLABLE WRAPPER
+  // Compact mode (landscape kecil): maxHeight diperkecil agar
+  // cart masih punya ruang yang cukup di atas summary.
+  // ============================================================
+  Widget _buildSummaryScrollable(PenjualanState state, double availableHeight) {
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    // Compact landscape: summary ringkas, beri maks ~50% tinggi
+    // Normal landscape : ~60%
+    // Portrait         : ~45%
+    final double maxFraction;
+    if (_isCompactHeader) {
+      maxFraction = 0.52;
+    } else if (_isLandscape) {
+      maxFraction = 0.60;
+    } else {
+      maxFraction = 0.45;
+    }
+
     return ConstrainedBox(
-      // Batasi tinggi maksimum agar tidak overflow saat keyboard tutup,
-      // tapi tetap bisa tumbuh saat keyboard terbuka.
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.55,
+        maxHeight: availableHeight * maxFraction,
       ),
       child: SingleChildScrollView(
-        // Padding bawah = tinggi keyboard sehingga konten tidak tertutup
         padding: EdgeInsets.only(bottom: keyboardHeight),
-        // Scroll ke bawah otomatis saat keyboard muncul
-        reverse: false,
         child: _buildSummary(state),
       ),
     );
@@ -2927,61 +3752,83 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
   // ============================================================
   // SUMMARY PANEL (kanan)
+  // Compact mode: sembunyikan baris Gross/Diskon/DPP/Pajak agar
+  // panel summary lebih pendek di layar landscape kecil.
   // ============================================================
   Widget _buildSummary(PenjualanState state) {
+    final compact = _isCompactHeader; // reuse flag
+    final inputDeco = InputDecoration(
+      border: const OutlineInputBorder(),
+      contentPadding: EdgeInsets.symmetric(
+          horizontal: 10, vertical: compact ? 6 : 8),
+      isDense: true,
+    );
+
     return Container(
       color: Colors.white,
-      padding: _panelPadding,
+      padding: compact ? _compactPadding : _panelPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Total Pembelian',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
-          const Divider(),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('Gross'),
-            Text('Rp ${CurrencyFormat.format(state.gross)}'),
-          ]),
-          const SizedBox(height: 4),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('Diskon'),
-            Text('Rp ${CurrencyFormat.format(state.diskon)}'),
-          ]),
-          const Divider(),
+          // ── Total baris (selalu terlihat) ──
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             Text('TOTAL',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
             Text('Rp ${CurrencyFormat.format(state.total)}',
-                style:
-                    TextStyle(fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
           ]),
-          const Divider(),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('DPP', style: TextStyle(color: Colors.grey)),
-            Text('Rp ${CurrencyFormat.format(state.dpp)}',
-                style: const TextStyle(color: Colors.grey)),
-          ]),
-          const SizedBox(height: 4),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('Pajak', style: TextStyle(color: Colors.grey)),
-            Text('Rp ${CurrencyFormat.format(state.pajak)}',
-                style: const TextStyle(color: Colors.grey)),
-          ]),
-          const Divider(),
+
+          // ── Detail baris — sembunyikan di compact ──
+          if (!compact) ...[
+            const Divider(height: 12),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('Gross'),
+              Text('Rp ${CurrencyFormat.format(state.gross)}'),
+            ]),
+            const SizedBox(height: 3),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              const Text('Diskon'),
+              Text('Rp ${CurrencyFormat.format(state.diskon)}'),
+            ]),
+            const Divider(height: 12),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text('DPP', style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+              Text('Rp ${CurrencyFormat.format(state.dpp)}',
+                  style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+            ]),
+            const SizedBox(height: 3),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text('Pajak', style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+              Text('Rp ${CurrencyFormat.format(state.pajak)}',
+                  style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+            ]),
+          ] else ...[
+            // Di compact: tampilkan DPP+Pajak ringkas 1 baris
+            if (state.pajak > 0)
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text('Pajak',
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: _smallFontSize)),
+                Text('Rp ${CurrencyFormat.format(state.pajak)}',
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: _smallFontSize)),
+              ]),
+          ],
+
+          SizedBox(height: compact ? 6 : 8),
 
           // Cara Bayar
           DropdownButtonFormField<int>(
             initialValue: state.caraBayarID == 0 ? null : state.caraBayarID,
-            decoration: const InputDecoration(
-              labelText: 'Cara Bayar',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              isDense: true,
-            ),
+            decoration: inputDeco.copyWith(labelText: 'Cara Bayar'),
+            style: TextStyle(fontSize: _labelFontSize, color: Colors.black87),
             items: _caraBayarList.map((c) {
               return DropdownMenuItem<int>(
                 value: int.parse(c['dim_carabayar_id'].toString()),
-                child: Text(c['nama']),
+                child: Text(c['nama'],
+                    style: TextStyle(fontSize: _labelFontSize)),
               );
             }).toList(),
             onChanged: (val) {
@@ -2995,17 +3842,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               }
             },
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: compact ? 5 : 8),
 
           // Nominal Bayar
           TextField(
             controller: _nominalController,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+            style: TextStyle(fontSize: _labelFontSize),
+            decoration: inputDeco.copyWith(
               labelText: 'Nominal Bayar',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              isDense: true,
               prefixText: 'Rp ',
             ),
             onChanged: (val) {
@@ -3013,48 +3858,119 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               ref.read(penjualanProvider.notifier).setNominalBayar(nominal);
             },
           ),
-          const SizedBox(height: 12),
-
-          // PENDING
-          SizedBox(
-            width: double.infinity,
-            height: _buttonHeight,
-            child: ElevatedButton(
-              onPressed: state.items.isEmpty ? null : _showPendingDialog,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: Text(
-                _isTinyTablet ? 'PENDING' : 'PENDING PAYMENT',
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          // BAYAR
-          SizedBox(
-            width: double.infinity,
-            height: _buttonHeight,
-            child: ElevatedButton(
-              onPressed: state.items.isEmpty ? null : _prosesBayar,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1D273B),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: Text('BAYAR',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: _labelFontSize)),
-            ),
-          ),
         ],
       ),
+    );
+  }
+
+  // ============================================================
+  // ACTION BUTTONS — PENDING + BAYAR (pinned fixed footer)
+  // Compact mode: 2 tombol sejajar horizontal agar hemat tinggi.
+  // ============================================================
+  Widget _buildActionButtons(PenjualanState state) {
+    final compact = _isCompactHeader;
+    final vPad = compact ? 6.0 : 8.0;
+
+    return Container(
+      color: Colors.white,
+      padding: EdgeInsets.fromLTRB(
+        compact ? 8 : _panelPadding.left,
+        vPad,
+        compact ? 8 : _panelPadding.right,
+        compact ? 6 : _panelPadding.bottom,
+      ),
+      child: compact
+          // ── Landscape kecil: tombol sejajar ──
+          ? Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: _buttonHeight,
+                    child: ElevatedButton(
+                      onPressed: state.items.isEmpty ? null : _showPendingDialog,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: Text(
+                        'PENDING',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: _labelFontSize),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: SizedBox(
+                    height: _buttonHeight,
+                    child: ElevatedButton(
+                      onPressed: state.items.isEmpty ? null : _prosesBayar,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1D273B),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6)),
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: Text(
+                        'BAYAR',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: _labelFontSize),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            )
+          // ── Portrait / tablet besar: tombol vertikal ──
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  height: _buttonHeight,
+                  child: ElevatedButton(
+                    onPressed: state.items.isEmpty ? null : _showPendingDialog,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Text(
+                      'PENDING PAYMENT',
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  height: _buttonHeight,
+                  child: ElevatedButton(
+                    onPressed: state.items.isEmpty ? null : _prosesBayar,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1D273B),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Text(
+                      'BAYAR',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: _labelFontSize),
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
