@@ -149,6 +149,7 @@ class PrinterHelper {
         keterangan, // catatan keseluruhan transaksi (dari tr_invoice.keterangan)
     String? logoFileName, // nama file logo saja, contoh: "logo_abc.png"
     String? logoUrl, // full URL untuk download fallback
+    String? jamTransaksi, // jam transaksi dari created_date (HH:mm)
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
@@ -225,6 +226,9 @@ class PrinterHelper {
     // ── INFO TRANSAKSI ───────────────────────────────────────────
     bytes += generator.text('No : $invoiceNumber');
     bytes += generator.text('Tgl: $tanggal');
+    if (jamTransaksi != null && jamTransaksi.isNotEmpty) {
+      bytes += generator.text('Jam: $jamTransaksi');
+    }
     bytes += generator.text('Kas: $kasir');
     if (memberNama.isNotEmpty) {
       bytes += generator.text('Mbr: $memberNama');
@@ -411,6 +415,18 @@ class PrinterHelper {
     );
 
     bytes += generator.feed(1);
+
+    // ── WATERMARK ─────────────────────────────────────────────────
+    final now = DateTime.now();
+    final printAt =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    bytes += generator.text(
+      'Print by Aibipi POS on $printAt',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+
+    bytes += generator.feed(1);
     bytes += generator.cut();
 
     return await PrintBluetoothThermal.writeBytes(bytes);
@@ -440,6 +456,7 @@ class PrinterHelper {
     String? salesTipe, // channel penjualan (dine-in, takeaway, dll)
     String? orderNote, // catatan order keseluruhan
     String? keterangan, // catatan transaksi (dari tr_invoice.keterangan)
+    String? jamTransaksi, // jam transaksi dari created_date (HH:mm)
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
@@ -484,6 +501,9 @@ class PrinterHelper {
     // ── INFO ORDER ───────────────────────────────────────────────
     bytes += generator.text('No : $invoiceNumber');
     bytes += generator.text('Tgl: $tanggal');
+    if (jamTransaksi != null && jamTransaksi.isNotEmpty) {
+      bytes += generator.text('Jam: $jamTransaksi');
+    }
     bytes += generator.text('Kas: $kasir');
     if (memberNama.isNotEmpty) {
       bytes += generator.text('Mbr: $memberNama');
@@ -579,6 +599,18 @@ class PrinterHelper {
     }
 
     bytes += generator.feed(1);
+
+    // ── WATERMARK ─────────────────────────────────────────────────
+    final now = DateTime.now();
+    final printAt =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    bytes += generator.text(
+      'Print by Aibipi POS on $printAt',
+      styles: const PosStyles(align: PosAlign.center),
+    );
+
+    bytes += generator.feed(1);
     bytes += generator.cut();
 
     return await PrintBluetoothThermal.writeBytes(bytes);
@@ -620,6 +652,7 @@ class PrinterHelper {
     String? keterangan, // catatan transaksi — diteruskan ke customer & kitchen
     String? logoFileName, // nama file logo — hanya untuk customer copy
     String? logoUrl, // full URL fallback download logo
+    String? jamTransaksi, // jam transaksi — diteruskan ke customer & kitchen
   }) async {
     final customerOk = await printInvoice(
       storeName: storeName,
@@ -645,6 +678,7 @@ class PrinterHelper {
       keterangan: keterangan,
       logoFileName: logoFileName,
       logoUrl: logoUrl,
+      jamTransaksi: jamTransaksi,
       copyCount: 1,
     );
 
@@ -662,6 +696,7 @@ class PrinterHelper {
       salesTipe: salesTipe,
       orderNote: orderNote,
       keterangan: keterangan,
+      jamTransaksi: jamTransaksi,
       copyCount: 1,
     );
 
@@ -698,6 +733,7 @@ class PrinterHelper {
     String? keterangan,
     String? logoFileName,
     String? logoUrl,
+    String? jamTransaksi, // jam transaksi dari created_date (HH:mm)
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
@@ -761,6 +797,9 @@ class PrinterHelper {
     // ── INFO TRANSAKSI ───────────────────────────────────────────
     bytes += generator.text('No : $invoiceNumber');
     bytes += generator.text('Tgl: $tanggal');
+    if (jamTransaksi != null && jamTransaksi.isNotEmpty) {
+      bytes += generator.text('Jam: $jamTransaksi');
+    }
     bytes += generator.text('Kas: $kasir');
     if (memberNama.isNotEmpty) {
       bytes += generator.text('Mbr: $memberNama');
@@ -847,6 +886,18 @@ class PrinterHelper {
         : 'Terima kasih atas kunjungan Anda';
     bytes += generator.text(
       noteText,
+      styles: const PosStyles(align: PosAlign.center),
+    );
+
+    bytes += generator.feed(1);
+
+    // ── WATERMARK ─────────────────────────────────────────────────
+    final now = DateTime.now();
+    final printAt =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    bytes += generator.text(
+      'Print by Aibipi POS on $printAt',
       styles: const PosStyles(align: PosAlign.center),
     );
 

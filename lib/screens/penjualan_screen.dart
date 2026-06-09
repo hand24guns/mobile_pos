@@ -57,6 +57,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   List<Map<String, dynamic>> _channels = [];
   List<Map<String, dynamic>> _caraBayarList = [];
 
+  // ── WA disconnect banner ──────────────────────────────────────
+  // 1 = WA diaktifkan tapi server WA tidak terdaftar/kosong
+  int _waDisconnected = 0;
+  bool _waBannerDismissed = false;
+
   // ── Product image grid — dikelompokkan per kategori (jenis produk) ──
   // Struktur: [ { 'id': int, 'nama': String, 'produk': [ {kode,nama,hpj,image} ] } ]
   List<Map<String, dynamic>> _imageCategories = [];
@@ -132,6 +137,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 _activeStoreName = '';
                 _isFnb = false;
                 _isLoading = true;
+                _waDisconnected = 0;
+                _waBannerDismissed = false;
               });
               _loadInitialData();
               _startShiftPolling();
@@ -227,7 +234,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ),
                 actions: [
                   ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await _logout();
+                    },
                     style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF1D273B)),
                     child:
@@ -236,7 +246,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ],
               ),
             );
-            _loadInitialData();
+            // Tidak perlu _loadInitialData() — sudah logout
             return;
           }
         }
@@ -292,6 +302,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       _activeStoreID = storeID;
       _activeOrgID = organisasiID;
       _activeStoreName = storeName;
+
+      // Load status WA untuk banner — cek apakah WA aktif tapi server belum dikonfigurasi
+      try {
+        final storeDataRes = await dio.post('/penjualan.php',
+            data: FormData.fromMap({
+              'action': 'getStoreData',
+              'store_id': storeID,
+            }));
+        _waDisconnected = (storeDataRes.data['wa_disconnected'] as num? ?? 0).toInt();
+      } catch (_) {}
 
       setState(() => _isLoading = false);
       _loadImageProducts();
@@ -1393,137 +1413,152 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
 
-    final session = await SessionService.getSession();
-    final dio = ApiService.getDio(token: _token);
+    try {
+      final session = await SessionService.getSession();
+      final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'prosesBayar',
-          'number': state.number,
-          'cara_bayar_id': state.caraBayarID,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'user_id': session['user_id'],
-          'sales_tipe_id': state.salesTipeID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'retur_source': ref.read(penjualanProvider).returSource,
-          'nominal_bayar': state.nominalBayar,
-          'device_token': _deviceToken,
-          'keterangan': _keteranganController.text.trim(),
-        }));
+      final res = await dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'prosesBayar',
+            'number': state.number,
+            'cara_bayar_id': state.caraBayarID,
+            'store_id': state.storeID,
+            'organisasi_id': state.organisasiID,
+            'user_id': session['user_id'],
+            'sales_tipe_id': state.salesTipeID,
+            'member_id': state.memberID ?? 0,
+            'voucher': _activeVoucher,
+            'retur_source': ref.read(penjualanProvider).returSource,
+            'nominal_bayar': state.nominalBayar,
+            'device_token': _deviceToken,
+            'keterangan': _keteranganController.text.trim(),
+          }));
 
-    if (mounted) Navigator.pop(context); // tutup loading
+      if (mounted) Navigator.pop(context); // tutup loading
 
-    if (res.data['success'] == true) {
-      final kembalian = res.data['kembalian'];
+      if (res.data['success'] == true) {
+        final kembalian = res.data['kembalian'];
 
-      _kirimWADanEmail(
-        invoiceNumber: state.number,
-        storeID: state.storeID,
-        organisasiID: state.organisasiID,
-        memberID: state.memberID,
-      );
+        _kirimWADanEmail(
+          invoiceNumber: state.number,
+          storeID: state.storeID,
+          organisasiID: state.organisasiID,
+          memberID: state.memberID,
+        );
 
-      if (mounted) {
-        await showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Transaksi Berhasil!'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.check_circle, color: Colors.green, size: 64),
-                const SizedBox(height: 16),
-                Text(
-                  'Kembalian: Rp ${CurrencyFormat.format(kembalian)}',
-                  style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold),
+        if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Transaksi Berhasil!'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.green, size: 64),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Kembalian: Rp ${CurrencyFormat.format(kembalian)}',
+                    style: const TextStyle(
+                        fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              actions: [
+                // ── Tombol Print — adaptif FnB vs non-FnB ───────
+                if (_isFnb)
+                  // FnB: satu tombol → buka bottom sheet pilih
+                  // Customer / Kitchen / Keduanya
+                  TextButton.icon(
+                    onPressed: () async {
+                      final caraBayar = _caraBayarList.firstWhere(
+                            (c) =>
+                                int.parse(c['dim_carabayar_id'].toString()) ==
+                                state.caraBayarID,
+                            orElse: () => {'nama': ''},
+                          )['nama'] as String? ??
+                          '';
+                      Navigator.pop(context); // tutup dialog sukses dulu
+                      await _showPrintSheet(
+                        invoiceNumber: state.number,
+                        kembalian: (kembalian as num).toDouble(),
+                        caraBayar: caraBayar,
+                        currentState: state,
+                      );
+                      if (_activePendingOrderID != null) {
+                        try {
+                          await _deletePending(_activePendingOrderID!);
+                        } catch (_) {}
+                      }
+                      _resetTransaksi();
+                    },
+                    icon: const Icon(Icons.print, size: 18),
+                    label: const Text('Print'),
+                  )
+                else
+                  // Non-FnB (retail): langsung print customer copy
+                  TextButton.icon(
+                    onPressed: () async {
+                      final caraBayar = _caraBayarList.firstWhere(
+                            (c) =>
+                                int.parse(c['dim_carabayar_id'].toString()) ==
+                                state.caraBayarID,
+                            orElse: () => {'nama': ''},
+                          )['nama'] as String? ??
+                          '';
+                      await _handlePrint(
+                        invoiceNumber: state.number,
+                        kembalian: (kembalian as num).toDouble(),
+                        caraBayar: caraBayar,
+                        currentState: state,
+                        isKitchenMode: false,
+                      );
+                      if (mounted) {
+                        Navigator.pop(context);
+                        if (_activePendingOrderID != null) {
+                          try {
+                            await _deletePending(_activePendingOrderID!);
+                          } catch (_) {}
+                        }
+                        _resetTransaksi();
+                      }
+                    },
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    label: const Text('Print'),
+                  ),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    if (_activePendingOrderID != null) {
+                      try {
+                        await _deletePending(_activePendingOrderID!);
+                      } catch (_) {}
+                    }
+                    _resetTransaksi();
+                  },
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1D273B)),
+                  child: const Text('Selesai',
+                      style: TextStyle(color: Colors.white)),
                 ),
               ],
             ),
-            actions: [
-              // ── Tombol Print — adaptif FnB vs non-FnB ───────
-              if (_isFnb)
-                // FnB: satu tombol → buka bottom sheet pilih
-                // Customer / Kitchen / Keduanya
-                TextButton.icon(
-                  onPressed: () async {
-                    final caraBayar = _caraBayarList.firstWhere(
-                          (c) =>
-                              int.parse(c['dim_carabayar_id'].toString()) ==
-                              state.caraBayarID,
-                          orElse: () => {'nama': ''},
-                        )['nama'] as String? ??
-                        '';
-                    Navigator.pop(context); // tutup dialog sukses dulu
-                    await _showPrintSheet(
-                      invoiceNumber: state.number,
-                      kembalian: (kembalian as num).toDouble(),
-                      caraBayar: caraBayar,
-                      currentState: state,
-                    );
-                    // Hapus pending order dari DB jika transaksi ini berasal dari retrieve pending
-    if (_activePendingOrderID != null) {
-      await _deletePending(_activePendingOrderID!);
-    }
-                    _resetTransaksi();
-                  },
-                  icon: const Icon(Icons.print, size: 18),
-                  label: const Text('Print'),
-                )
-              else
-                // Non-FnB (retail): langsung print customer copy
-                TextButton.icon(
-                  onPressed: () async {
-                    final caraBayar = _caraBayarList.firstWhere(
-                          (c) =>
-                              int.parse(c['dim_carabayar_id'].toString()) ==
-                              state.caraBayarID,
-                          orElse: () => {'nama': ''},
-                        )['nama'] as String? ??
-                        '';
-                    await _handlePrint(
-                      invoiceNumber: state.number,
-                      kembalian: (kembalian as num).toDouble(),
-                      caraBayar: caraBayar,
-                      currentState: state,
-                      isKitchenMode: false,
-                    );
-                    if (mounted) {
-                      Navigator.pop(context);
-                      // Hapus pending order dari DB jika transaksi ini berasal dari retrieve pending
-    if (_activePendingOrderID != null) {
-      await _deletePending(_activePendingOrderID!);
-    }
-                      _resetTransaksi();
-                    }
-                  },
-                  icon: const Icon(Icons.receipt_long, size: 18),
-                  label: const Text('Print'),
-                ),
-              ElevatedButton(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  // Hapus pending order dari DB jika transaksi ini berasal dari retrieve pending
-    if (_activePendingOrderID != null) {
-      await _deletePending(_activePendingOrderID!);
-    }
-                  _resetTransaksi();
-                },
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1D273B)),
-                child: const Text('Selesai',
-                    style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
-        );
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(res.data['message'] ?? 'Transaksi gagal')),
+          );
+        }
       }
-    } else {
+    } catch (e) {
       if (mounted) {
+        Navigator.pop(context); // pastikan loading tertutup meski error
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.data['message'] ?? 'Transaksi gagal')),
+          SnackBar(
+            content: Text('Gagal memproses transaksi: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -1585,7 +1620,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID: int.parse(_channels.first['dim_salestipe_id'].toString()),
+          salesTipeID:
+              int.parse(_channels.first['dim_salestipe_id'].toString()),
         );
 
     setState(() {
@@ -1700,6 +1736,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final kasirNama =
           (await SessionService.getSession())['nama'] as String? ?? '';
       final tanggal = DateTime.now().toString().substring(0, 16);
+      // Jam transaksi — dari waktu sekarang (saat baru bayar)
+      final nowForJam = DateTime.now();
+      final jamTransaksi =
+          '${nowForJam.hour.toString().padLeft(2, '0')}:${nowForJam.minute.toString().padLeft(2, '0')}';
 
       // ── Print berdasarkan mode ───────────────────────────────
       if (isFnb || isKitchenMode) {
@@ -1728,6 +1768,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           keterangan: keteranganTrx.isNotEmpty ? keteranganTrx : null,
           logoFileName: logoFileName.isNotEmpty ? logoFileName : null,
           logoUrl: logoUrl.isNotEmpty ? logoUrl : null,
+          jamTransaksi: jamTransaksi,
         );
 
         if (mounted) {
@@ -1781,6 +1822,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           keterangan: keteranganTrx.isNotEmpty ? keteranganTrx : null,
           logoFileName: logoFileName.isNotEmpty ? logoFileName : null,
           logoUrl: logoUrl.isNotEmpty ? logoUrl : null,
+          jamTransaksi: jamTransaksi,
         );
 
         if (mounted) {
@@ -1964,6 +2006,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final kasirNama =
           (await SessionService.getSession())['nama'] as String? ?? '';
       final tanggal = DateTime.now().toString().substring(0, 16);
+      final nowForJam = DateTime.now();
+      final jamTransaksi =
+          '${nowForJam.hour.toString().padLeft(2, '0')}:${nowForJam.minute.toString().padLeft(2, '0')}';
 
       await PrinterHelper.printKitchen(
         storeName: storeName,
@@ -1971,8 +2016,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         tanggal: tanggal,
         kasir: kasirNama,
         items: items,
+        memberNama: currentState.memberNama,
         total: currentState.total,
         keterangan: keteranganTrx.isNotEmpty ? keteranganTrx : null,
+        jamTransaksi: jamTransaksi,
       );
 
       if (mounted) {
@@ -2328,7 +2375,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Text(
                   'Print Pending — $invoiceLabel',
                   style: const TextStyle(
@@ -2337,7 +2385,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               ),
               const Divider(),
               ListTile(
-                leading: const Icon(Icons.receipt_long, color: Color(0xFF1D273B)),
+                leading:
+                    const Icon(Icons.receipt_long, color: Color(0xFF1D273B)),
                 title: const Text('Customer Copy'),
                 subtitle: const Text('Struk estimasi untuk pelanggan'),
                 onTap: () {
@@ -2383,7 +2432,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Belum ada printer terhubung. Buka pengaturan printer.'),
+              content:
+                  Text('Belum ada printer terhubung. Buka pengaturan printer.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -2421,7 +2471,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         }));
 
     // Gunakan salestipe_nama & keterangan dari header order (bukan dari state aktif)
-    final salesTipeNama = (itemsRes.data['salestipe_nama'] as String? ?? '').isNotEmpty
+    final salesTipeNama = (itemsRes.data['salestipe_nama'] as String? ?? '')
+            .isNotEmpty
         ? itemsRes.data['salestipe_nama'] as String
         : (_channels.isNotEmpty
             ? (_channels
@@ -2435,10 +2486,19 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 '')
             : '');
     final keteranganOrder = itemsRes.data['keterangan_order'] as String? ?? '';
+    // Tanggal dari tr_sales_order.tanggal (date saat order dibuat)
+    final tanggalRaw = itemsRes.data['tanggal']?.toString() ?? '';
+    final tanggal = tanggalRaw.isNotEmpty
+        ? tanggalRaw.substring(0, tanggalRaw.length >= 10 ? 10 : tanggalRaw.length)
+        : DateTime.now().toString().substring(0, 10); // fallback
+    // Jam transaksi dari created_date order pending (format: "2024-01-15 14:30:00" → "14:30")
+    final createdDateRaw = itemsRes.data['created_date']?.toString() ?? '';
+    final jamTransaksiPending = createdDateRaw.length >= 16
+        ? createdDateRaw.substring(11, 16)
+        : (createdDateRaw.length >= 13 ? createdDateRaw.substring(11) : '');
 
     final kasirNama =
         (await SessionService.getSession())['nama'] as String? ?? '';
-    final tanggal = DateTime.now().toString().substring(0, 16);
     final invoiceLabel = (order['label'] as String? ?? '').isNotEmpty
         ? order['label'] as String
         : order['kode'] as String;
@@ -2458,6 +2518,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       'invoiceLabel': invoiceLabel,
       'memberNama': order['member'] as String? ?? '',
       'keterangan': keteranganOrder,
+      'jamTransaksi': jamTransaksiPending,
     };
   }
 
@@ -2477,11 +2538,19 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         items: d['items'],
         estimasiTotal: d['estimasiTotal'],
         npwp: (d['storeNpwp'] as String).isNotEmpty ? d['storeNpwp'] : null,
-        invoiceNote: (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
-        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
-        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
-        logoFileName: (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
+        invoiceNote:
+            (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty
+            ? d['salesTipeNama']
+            : null,
+        keterangan:
+            (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        logoFileName:
+            (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
         logoUrl: (d['logoUrl'] as String).isNotEmpty ? d['logoUrl'] : null,
+        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
+            ? d['jamTransaksi']
+            : null,
       );
 
       if (mounted) {
@@ -2514,8 +2583,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         memberNama: d['memberNama'],
         items: d['items'],
         total: d['estimasiTotal'],
-        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
-        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty
+            ? d['salesTipeNama']
+            : null,
+        keterangan:
+            (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
+            ? d['jamTransaksi']
+            : null,
       );
 
       if (mounted) {
@@ -2551,11 +2626,19 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         items: d['items'],
         estimasiTotal: d['estimasiTotal'],
         npwp: (d['storeNpwp'] as String).isNotEmpty ? d['storeNpwp'] : null,
-        invoiceNote: (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
-        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
-        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
-        logoFileName: (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
+        invoiceNote:
+            (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty
+            ? d['salesTipeNama']
+            : null,
+        keterangan:
+            (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        logoFileName:
+            (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
         logoUrl: (d['logoUrl'] as String).isNotEmpty ? d['logoUrl'] : null,
+        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
+            ? d['jamTransaksi']
+            : null,
       );
 
       await Future.delayed(const Duration(milliseconds: 500));
@@ -2569,8 +2652,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         memberNama: d['memberNama'],
         items: d['items'],
         total: d['estimasiTotal'],
-        salesTipe: (d['salesTipeNama'] as String).isNotEmpty ? d['salesTipeNama'] : null,
-        keterangan: (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        salesTipe: (d['salesTipeNama'] as String).isNotEmpty
+            ? d['salesTipeNama']
+            : null,
+        keterangan:
+            (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
+        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
+            ? d['jamTransaksi']
+            : null,
       );
 
       if (mounted) {
@@ -2721,11 +2810,42 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       body: SafeArea(
         // SafeArea memastikan konten tidak tertutup navbar/status bar
         // di semua orientasi dan semua jenis navigation (3-button maupun gesture)
-        child: _isLandscape
-            // ── LAYOUT SIDE-BY-SIDE (landscape) ─────────────────
-            ? _buildSideBySideLayout(state)
-            // ── LAYOUT STACKED (portrait) ────────────────────────
-            : _buildStackedLayout(state),
+        child: Column(
+          children: [
+            // ── Banner WA disconnect — hanya muncul kalau WA aktif
+            // tapi server WA belum dikonfigurasi, dan belum di-dismiss
+            if (_waDisconnected == 1 && !_waBannerDismissed)
+              MaterialBanner(
+                backgroundColor: const Color(0xFFFFF3CD),
+                leading: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: Color(0xFF856404),
+                ),
+                content: const Text(
+                  'Server WA tidak tersambung. Atur di menu Pengaturan.',
+                  style: TextStyle(color: Color(0xFF856404), fontSize: 13),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _waBannerDismissed = true),
+                    child: const Text(
+                      'Tutup',
+                      style: TextStyle(color: Color(0xFF856404)),
+                    ),
+                  ),
+                ],
+              ),
+            // ── Layout utama ─────────────────────────────────────
+            Expanded(
+              child: _isLandscape
+                  // ── LAYOUT SIDE-BY-SIDE (landscape) ─────────────────
+                  ? _buildSideBySideLayout(state)
+                  // ── LAYOUT STACKED (portrait) ────────────────────────
+                  : _buildStackedLayout(state),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3020,8 +3140,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                             overflow: TextOverflow.ellipsis),
                         Text(state.number,
                             style: TextStyle(
-                                fontSize: _smallFontSize,
-                                color: Colors.grey)),
+                                fontSize: _smallFontSize, color: Colors.grey)),
                       ],
                     ),
                   ],
@@ -3164,13 +3283,12 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                           tooltip: 'Voucher',
                           onPressed: _showVoucherDialog,
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                              minWidth: 36, minHeight: 36),
+                          constraints:
+                              const BoxConstraints(minWidth: 36, minHeight: 36),
                         )
                       : OutlinedButton.icon(
                           onPressed: _showVoucherDialog,
-                          icon: const Icon(
-                              Icons.confirmation_number_outlined,
+                          icon: const Icon(Icons.confirmation_number_outlined,
                               size: 16),
                           label: const Text('Voucher'),
                           style: OutlinedButton.styleFrom(
@@ -3759,8 +3877,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final compact = _isCompactHeader; // reuse flag
     final inputDeco = InputDecoration(
       border: const OutlineInputBorder(),
-      contentPadding: EdgeInsets.symmetric(
-          horizontal: 10, vertical: compact ? 6 : 8),
+      contentPadding:
+          EdgeInsets.symmetric(horizontal: 10, vertical: compact ? 6 : 8),
       isDense: true,
     );
 
@@ -3794,15 +3912,21 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ]),
             const Divider(height: 12),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('DPP', style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+              Text('DPP',
+                  style:
+                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
               Text('Rp ${CurrencyFormat.format(state.dpp)}',
-                  style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+                  style:
+                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
             ]),
             const SizedBox(height: 3),
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Pajak', style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+              Text('Pajak',
+                  style:
+                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
               Text('Rp ${CurrencyFormat.format(state.pajak)}',
-                  style: TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
+                  style:
+                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
             ]),
           ] else ...[
             // Di compact: tampilkan DPP+Pajak ringkas 1 baris
@@ -3827,8 +3951,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             items: _caraBayarList.map((c) {
               return DropdownMenuItem<int>(
                 value: int.parse(c['dim_carabayar_id'].toString()),
-                child: Text(c['nama'],
-                    style: TextStyle(fontSize: _labelFontSize)),
+                child:
+                    Text(c['nama'], style: TextStyle(fontSize: _labelFontSize)),
               );
             }).toList(),
             onChanged: (val) {
@@ -3887,7 +4011,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   child: SizedBox(
                     height: _buttonHeight,
                     child: ElevatedButton(
-                      onPressed: state.items.isEmpty ? null : _showPendingDialog,
+                      onPressed:
+                          state.items.isEmpty ? null : _showPendingDialog,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red,
                         shape: RoundedRectangleBorder(

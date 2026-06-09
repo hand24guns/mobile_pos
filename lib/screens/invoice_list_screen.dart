@@ -321,6 +321,12 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           ? invoice['tanggal'].toString().substring(0, 16)
           : invoice['tanggal'].toString();
 
+      // Jam transaksi dari created_date (format: "2024-01-15 14:30:00" → "14:30")
+      final createdDateRaw = invoice['created_date']?.toString() ?? '';
+      final jamTransaksi = createdDateRaw.length >= 16
+          ? createdDateRaw.substring(11, 16)
+          : (createdDateRaw.length >= 13 ? createdDateRaw.substring(11) : '');
+
       // 4. Print customer copy
       if (printCustomer) {
         await PrinterHelper.printInvoice(
@@ -347,6 +353,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           logoUrl: _logoUrl.isNotEmpty ? _logoUrl : null,
           copyCount: copyCount,
           salesTipe: invoice['sales_tipe'] ?? '',
+          jamTransaksi: jamTransaksi.isNotEmpty ? jamTransaksi : null,
         );
       }
 
@@ -363,10 +370,12 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           tanggal: tanggal,
           kasir: invoice['kasir'] ?? '',
           items: items,
+          memberNama: invoice['member'] ?? '',
           total: (invoice['total'] as num).toDouble(),
           keterangan: keteranganTrx,
           copyCount: copyCount,
           salesTipe: invoice['sales_tipe'] ?? '',
+          jamTransaksi: jamTransaksi.isNotEmpty ? jamTransaksi : null,
         );
       }
 
@@ -393,12 +402,54 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   }
 
   Future<void> _sendWA(Map<String, dynamic> invoice) async {
-    final telp = invoice['member_telp'] ?? '';
+    String telp = invoice['member_telp'] ?? '';
+
+    // Kalau tidak ada nomor member, minta input manual
     if (telp.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Member tidak punya nomor WA')),
+      final ctrl = TextEditingController();
+      final input = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Kirim WA', style: TextStyle(fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Invoice: ${invoice['kode']}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 12),
+              const Text('Nomor WhatsApp tujuan:', style: TextStyle(fontSize: 13)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  hintText: 'Contoh: 08123456789',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  prefixIcon: Icon(Icons.phone),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              onPressed: () {
+                if (ctrl.text.trim().isEmpty) return;
+                Navigator.pop(ctx, ctrl.text.trim());
+              },
+              child: const Text('Kirim', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
       );
-      return;
+      if (input == null || input.isEmpty) return;
+      telp = input;
     }
 
     final dio = ApiService.getDio(token: _token);
@@ -417,6 +468,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
             'store_id': _activeStoreID,
             'organisasi_id': _organisasiID,
             'member_id': invoice['dim_bp_id'] ?? 0,
+            'override_telp': telp,
           }));
 
       if (mounted) Navigator.pop(context);
@@ -442,12 +494,54 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   }
 
   Future<void> _sendEmail(Map<String, dynamic> invoice) async {
-    final email = invoice['member_email'] ?? '';
+    String email = invoice['member_email'] ?? '';
+
+    // Kalau tidak ada email member, minta input manual
     if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Member tidak punya email')),
+      final ctrl = TextEditingController();
+      final input = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Kirim Email', style: TextStyle(fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Invoice: ${invoice['kode']}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 12),
+              const Text('Alamat email tujuan:', style: TextStyle(fontSize: 13)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  hintText: 'Contoh: pelanggan@email.com',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  prefixIcon: Icon(Icons.email),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+              onPressed: () {
+                if (ctrl.text.trim().isEmpty) return;
+                Navigator.pop(ctx, ctrl.text.trim());
+              },
+              child: const Text('Kirim', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
       );
-      return;
+      if (input == null || input.isEmpty) return;
+      email = input;
     }
 
     final dio = ApiService.getDio(token: _token);
@@ -466,6 +560,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
             'store_id': _activeStoreID,
             'organisasi_id': _organisasiID,
             'member_id': invoice['dim_bp_id'] ?? 0,
+            'override_email': email,
           }));
 
       if (mounted) Navigator.pop(context);
@@ -732,9 +827,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                             onPressed: () => _handlePrint(inv),
                                           ),
                                           // WA
-                                          if (_waEnabled == 1 &&
-                                              (inv['member_telp'] ?? '')
-                                                  .isNotEmpty)
+                                          if (_waEnabled == 1)
                                             IconButton(
                                               icon: const FaIcon(
                                                   FontAwesomeIcons.whatsapp,
@@ -743,14 +836,12 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                               onPressed: () => _sendWA(inv),
                                             ),
                                           // Email
-                                          if ((inv['member_email'] ?? '')
-                                              .isNotEmpty)
-                                            IconButton(
-                                              icon: const Icon(Icons.email,
-                                                  color: Colors.orange),
-                                              tooltip: 'Kirim Email',
-                                              onPressed: () => _sendEmail(inv),
-                                            ),
+                                          IconButton(
+                                            icon: const Icon(Icons.email,
+                                                color: Colors.orange),
+                                            tooltip: 'Kirim Email',
+                                            onPressed: () => _sendEmail(inv),
+                                          ),
                                           // Request Void
                                           IconButton(
                                             icon: const Icon(
