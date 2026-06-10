@@ -26,11 +26,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   String _activeInvoiceNote = '';
   String _logoFileName = '';
   String _logoUrl = '';
-  int _waEnabled = 0;
   bool _isFnB = false; // true jika jasa_perusahaan == 3
   bool _isMultiStore = false;
   bool _isLoading = true;
-  DateTime _dateFrom = DateTime.now().subtract(const Duration(days: 9));
+  DateTime _dateFrom = DateTime.now();
   DateTime _dateTo = DateTime.now();
   List<Map<String, dynamic>> _invoices = [];
 
@@ -48,7 +47,6 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
       final dio = ApiService.getDio(token: _token);
 
-      // Ambil semua store yang bisa diakses user
       final storeRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'getStores',
@@ -57,8 +55,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
       _isMultiStore = stores.length > 1;
 
-      // Ambil organisasiID + flag FnB dari store pertama
       _activeStoreID = int.parse(stores.first['id'].toString());
+
       final orgRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'getOrganisasiID',
@@ -67,7 +65,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       _organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
       _isFnB = (orgRes.data['is_fnb'] == 1);
 
-      // Cek shift aktif user → untuk tahu store mana yang aktif
+      // ✅ cekShiftUser DULU — biar _activeStoreID final
       final shiftRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'cekShiftUser',
@@ -77,14 +75,13 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       if (shiftRes.data['has_shift'] == true) {
         _activeStoreID = shiftRes.data['store_id'];
         _activeStoreName = shiftRes.data['store_nama'];
-        // Override flag FnB dari shift (sudah ada di response cekShiftUser)
+        _organisasiID = int.parse(shiftRes.data['organisasi_id'].toString());
         _isFnB = (shiftRes.data['is_fnb'] == 1);
       } else {
         _activeStoreName = stores.first['nama'].toString();
       }
 
-      // Load setting store aktif (untuk print/WA/email)
-      // Pakai getStoreData agar logo_file_name + logo_url ikut di-return
+      // ✅ getStoreData SETELAH shift resolved — _activeStoreID sudah benar
       final settingRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'getStoreData',
@@ -95,7 +92,6 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       _activeInvoiceNote = settingRes.data['invoice_note'] ?? '';
       _logoFileName = settingRes.data['logo_file_name'] ?? '';
       _logoUrl = settingRes.data['logo_url'] ?? '';
-      _waEnabled = settingRes.data['wa'] ?? 0;
 
       await _loadInvoices();
       setState(() => _isLoading = false);
@@ -402,54 +398,12 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   }
 
   Future<void> _sendWA(Map<String, dynamic> invoice) async {
-    String telp = invoice['member_telp'] ?? '';
-
-    // Kalau tidak ada nomor member, minta input manual
+    final telp = invoice['member_telp'] ?? '';
     if (telp.isEmpty) {
-      final ctrl = TextEditingController();
-      final input = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Kirim WA', style: TextStyle(fontSize: 16)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Invoice: ${invoice['kode']}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              const SizedBox(height: 12),
-              const Text('Nomor WhatsApp tujuan:', style: TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              TextField(
-                controller: ctrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  hintText: 'Contoh: 08123456789',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  prefixIcon: Icon(Icons.phone),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-              onPressed: () {
-                if (ctrl.text.trim().isEmpty) return;
-                Navigator.pop(ctx, ctrl.text.trim());
-              },
-              child: const Text('Kirim', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Member tidak punya nomor WA')),
       );
-      if (input == null || input.isEmpty) return;
-      telp = input;
+      return;
     }
 
     final dio = ApiService.getDio(token: _token);
@@ -468,7 +422,6 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
             'store_id': _activeStoreID,
             'organisasi_id': _organisasiID,
             'member_id': invoice['dim_bp_id'] ?? 0,
-            'override_telp': telp,
           }));
 
       if (mounted) Navigator.pop(context);
@@ -494,54 +447,12 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   }
 
   Future<void> _sendEmail(Map<String, dynamic> invoice) async {
-    String email = invoice['member_email'] ?? '';
-
-    // Kalau tidak ada email member, minta input manual
+    final email = invoice['member_email'] ?? '';
     if (email.isEmpty) {
-      final ctrl = TextEditingController();
-      final input = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Kirim Email', style: TextStyle(fontSize: 16)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Invoice: ${invoice['kode']}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              const SizedBox(height: 12),
-              const Text('Alamat email tujuan:', style: TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
-              TextField(
-                controller: ctrl,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  hintText: 'Contoh: pelanggan@email.com',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  prefixIcon: Icon(Icons.email),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-              onPressed: () {
-                if (ctrl.text.trim().isEmpty) return;
-                Navigator.pop(ctx, ctrl.text.trim());
-              },
-              child: const Text('Kirim', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Member tidak punya email')),
       );
-      if (input == null || input.isEmpty) return;
-      email = input;
+      return;
     }
 
     final dio = ApiService.getDio(token: _token);
@@ -560,7 +471,6 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
             'store_id': _activeStoreID,
             'organisasi_id': _organisasiID,
             'member_id': invoice['dim_bp_id'] ?? 0,
-            'override_email': email,
           }));
 
       if (mounted) Navigator.pop(context);
@@ -827,7 +737,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                             onPressed: () => _handlePrint(inv),
                                           ),
                                           // WA
-                                          if (_waEnabled == 1)
+                                          if ((inv['store_wa'] == 1) &&
+                                              (inv['member_telp'] ?? '')
+                                                  .isNotEmpty)
                                             IconButton(
                                               icon: const FaIcon(
                                                   FontAwesomeIcons.whatsapp,
@@ -836,12 +748,14 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                               onPressed: () => _sendWA(inv),
                                             ),
                                           // Email
-                                          IconButton(
-                                            icon: const Icon(Icons.email,
-                                                color: Colors.orange),
-                                            tooltip: 'Kirim Email',
-                                            onPressed: () => _sendEmail(inv),
-                                          ),
+                                          if ((inv['member_email'] ?? '')
+                                              .isNotEmpty)
+                                            IconButton(
+                                              icon: const Icon(Icons.email,
+                                                  color: Colors.orange),
+                                              tooltip: 'Kirim Email',
+                                              onPressed: () => _sendEmail(inv),
+                                            ),
                                           // Request Void
                                           IconButton(
                                             icon: const Icon(

@@ -422,8 +422,18 @@ class PrinterHelper {
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
     bytes += generator.text(
-      'Print by Aibipi POS on $printAt',
-      styles: const PosStyles(align: PosAlign.center),
+      'Print by Aibipi POS',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        fontType: PosFontType.fontB,
+      ),
+    );
+    bytes += generator.text(
+      'on $printAt',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        fontType: PosFontType.fontB,
+      ),
     );
 
     bytes += generator.feed(1);
@@ -606,8 +616,18 @@ class PrinterHelper {
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
     bytes += generator.text(
-      'Print by Aibipi POS on $printAt',
-      styles: const PosStyles(align: PosAlign.center),
+      'Print by Aibipi POS',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        fontType: PosFontType.fontB,
+      ),
+    );
+    bytes += generator.text(
+      'on $printAt',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        fontType: PosFontType.fontB,
+      ),
     );
 
     bytes += generator.feed(1);
@@ -897,8 +917,18 @@ class PrinterHelper {
         '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
     bytes += generator.text(
-      'Print by Aibipi POS on $printAt',
-      styles: const PosStyles(align: PosAlign.center),
+      'Print by Aibipi POS',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        fontType: PosFontType.fontB,
+      ),
+    );
+    bytes += generator.text(
+      'on $printAt',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        fontType: PosFontType.fontB,
+      ),
     );
 
     bytes += generator.feed(1);
