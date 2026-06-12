@@ -33,6 +33,28 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   DateTime _dateTo = DateTime.now();
   List<Map<String, dynamic>> _invoices = [];
 
+  // ── Filter cara bayar ────────────────────────────────────────
+  String? _selectedCaraBayar; // null = semua
+  List<String> _caraBayarOptions = [];
+
+  List<Map<String, dynamic>> get _filteredInvoices {
+    if (_selectedCaraBayar == null) return _invoices;
+    return _invoices
+        .where((inv) => inv['cara_bayar'] == _selectedCaraBayar)
+        .toList();
+  }
+
+  bool get _hasActiveFilter {
+    final today = DateTime.now();
+    final isDefaultDate = _dateFrom.year == today.year &&
+        _dateFrom.month == today.month &&
+        _dateFrom.day == today.day &&
+        _dateTo.year == today.year &&
+        _dateTo.month == today.month &&
+        _dateTo.day == today.day;
+    return !isDefaultDate || _selectedCaraBayar != null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -118,6 +140,19 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
     setState(() {
       _invoices = List<Map<String, dynamic>>.from(res.data['data']);
+      // Rebuild unique cara_bayar list dari data baru
+      final options = _invoices
+          .map((inv) => (inv['cara_bayar'] ?? '').toString().trim())
+          .where((v) => v.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      _caraBayarOptions = options;
+      // Reset pilihan kalau sudah tidak ada di list baru
+      if (_selectedCaraBayar != null &&
+          !_caraBayarOptions.contains(_selectedCaraBayar)) {
+        _selectedCaraBayar = null;
+      }
     });
   }
 
@@ -593,6 +628,83 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     }
   }
 
+  // ── Popup pilih cara bayar ───────────────────────────────────
+  Future<void> _pickCaraBayar() async {
+    final picked = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Filter Cara Bayar',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, ''),
+            child: Row(
+              children: [
+                Icon(Icons.all_inclusive,
+                    size: 18,
+                    color: _selectedCaraBayar == null
+                        ? const Color(0xFF1D273B)
+                        : Colors.grey),
+                const SizedBox(width: 10),
+                Text('Semua',
+                    style: TextStyle(
+                        fontWeight: _selectedCaraBayar == null
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: _selectedCaraBayar == null
+                            ? const Color(0xFF1D273B)
+                            : null)),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ..._caraBayarOptions.map((cb) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, cb),
+                child: Row(
+                  children: [
+                    Icon(Icons.payment,
+                        size: 18,
+                        color: _selectedCaraBayar == cb
+                            ? const Color(0xFF1D273B)
+                            : Colors.grey),
+                    const SizedBox(width: 10),
+                    Text(cb,
+                        style: TextStyle(
+                            fontWeight: _selectedCaraBayar == cb
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: _selectedCaraBayar == cb
+                                ? const Color(0xFF1D273B)
+                                : null)),
+                    if (_selectedCaraBayar == cb) ...[
+                      const Spacer(),
+                      const Icon(Icons.check,
+                          size: 16, color: Color(0xFF1D273B)),
+                    ],
+                  ],
+                ),
+              )),
+        ],
+      ),
+    );
+
+    if (picked == null) return;
+    setState(() {
+      _selectedCaraBayar = picked.isEmpty ? null : picked;
+    });
+  }
+
+  // ── Reset semua filter ke default ───────────────────────────
+  void _resetFilter() {
+    final today = DateTime.now();
+    setState(() {
+      _dateFrom = today;
+      _dateTo = today;
+      _selectedCaraBayar = null;
+    });
+    _loadInvoices();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -602,6 +714,23 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          // Filter cara bayar
+          TextButton.icon(
+            onPressed: _caraBayarOptions.isEmpty ? null : _pickCaraBayar,
+            icon: Icon(
+              Icons.payment,
+              color: _selectedCaraBayar != null ? Colors.amber : Colors.white,
+              size: 18,
+            ),
+            label: Text(
+              _selectedCaraBayar ?? 'Cara Bayar',
+              style: TextStyle(
+                color: _selectedCaraBayar != null ? Colors.amber : Colors.white,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          // Filter tanggal
           TextButton.icon(
             onPressed: _pickDateRange,
             icon: const Icon(Icons.date_range, color: Colors.white, size: 18),
@@ -610,11 +739,18 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
               style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
           ),
+          // Reset — hanya muncul kalau ada filter aktif
+          if (_hasActiveFilter)
+            IconButton(
+              icon: const Icon(Icons.refresh, color: Colors.amber),
+              tooltip: 'Reset Filter',
+              onPressed: _resetFilter,
+            ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _invoices.isEmpty
+          : _filteredInvoices.isEmpty
               ? const Center(
                   child: Text('Tidak ada transaksi',
                       style: TextStyle(color: Colors.grey)))
@@ -629,14 +765,32 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            '${_invoices.length} transaksi',
+                            '${_filteredInvoices.length} transaksi',
                             style: const TextStyle(color: Colors.white70),
                           ),
-                          Text(
-                            'Total: Rp ${CurrencyFormat.format(_invoices.fold(0.0, (sum, i) => sum + (i['total'] as num).toDouble()))}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'Invoice: ${_filteredInvoices.length}',
+                                  style: const TextStyle(
+                                      color: Colors.white70, fontSize: 12),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'Total: Rp ${CurrencyFormat.format(_filteredInvoices.fold(0.0, (sum, i) => sum + (i['total'] as num).toDouble()))}',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -645,9 +799,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                     Expanded(
                       child: ListView.builder(
                         padding: const EdgeInsets.all(8),
-                        itemCount: _invoices.length,
+                        itemCount: _filteredInvoices.length,
                         itemBuilder: (_, i) {
-                          final inv = _invoices[i];
+                          final inv = _filteredInvoices[i];
                           return Card(
                             child: Padding(
                               padding: const EdgeInsets.all(12),

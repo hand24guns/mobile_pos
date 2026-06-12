@@ -2,10 +2,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 class SessionService {
-  static const String _keyToken      = 'token';
-  static const String _keyUserID     = 'user_id';
-  static const String _keyNama       = 'nama';
-  static const String _keyUsername   = 'username';
+  static const String _keyToken       = 'token';
+  static const String _keyUserID      = 'user_id';
+  static const String _keyNama        = 'nama';
+  static const String _keyUsername    = 'username';
+  static const String _keyOutlets     = 'outlets'; // CSV: "1,2,3"
   static const String _keyDeviceToken = 'device_token';
 
   // ============================================================
@@ -23,18 +24,46 @@ class SessionService {
     return token;
   }
 
-  // Simpan session setelah login
+  // ============================================================
+  // SAVE SESSION — dipanggil setelah login sukses.
+  // outlets = list of dim_divisi_id yang bisa diakses user ini.
+  // ============================================================
   static Future<void> saveSession({
     required String token,
     required int userID,
     required String nama,
     required String username,
+    required List<int> outlets,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyToken, token);
-    await prefs.setInt(_keyUserID, userID);
-    await prefs.setString(_keyNama, nama);
+    await prefs.setString(_keyToken,    token);
+    await prefs.setInt(_keyUserID,      userID);
+    await prefs.setString(_keyNama,     nama);
     await prefs.setString(_keyUsername, username);
+    await prefs.setString(_keyOutlets,  outlets.join(','));
+  }
+
+  // ============================================================
+  // GET SESSION — returns semua field termasuk outlets as List<int>
+  // ============================================================
+  static Future<Map<String, dynamic>> getSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_keyOutlets) ?? '';
+    return {
+      'token':    prefs.getString(_keyToken)    ?? '',
+      'user_id':  prefs.getInt(_keyUserID)      ?? 0,
+      'nama':     prefs.getString(_keyNama)     ?? '',
+      'username': prefs.getString(_keyUsername) ?? '',
+      'outlets':  _parseOutlets(raw),
+    };
+  }
+
+  // ============================================================
+  // GET OUTLETS — shortcut kalau hanya butuh list store ID
+  // ============================================================
+  static Future<List<int>> getOutlets() async {
+    final prefs = await SharedPreferences.getInstance();
+    return _parseOutlets(prefs.getString(_keyOutlets) ?? '');
   }
 
   // Ambil token
@@ -43,30 +72,32 @@ class SessionService {
     return prefs.getString(_keyToken);
   }
 
-  // Ambil semua data session
-  static Future<Map<String, dynamic>> getSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'token':    prefs.getString(_keyToken) ?? '',
-      'user_id':  prefs.getInt(_keyUserID) ?? 0,
-      'nama':     prefs.getString(_keyNama) ?? '',
-      'username': prefs.getString(_keyUsername) ?? '',
-    };
-  }
-
   // Cek apakah sudah login
   static Future<bool> isLoggedIn() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyToken) != null;
   }
 
-  // Hapus session saat logout — device_token TIDAK dihapus
+  // ============================================================
+  // CLEAR SESSION — device_token TIDAK dihapus
   // supaya cart isolasi tetap konsisten meski user ganti akun
+  // ============================================================
   static Future<void> clearSession() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyToken);
     await prefs.remove(_keyUserID);
     await prefs.remove(_keyNama);
     await prefs.remove(_keyUsername);
+    await prefs.remove(_keyOutlets);
+  }
+
+  // ── Helper private ─────────────────────────────────────────
+  static List<int> _parseOutlets(String raw) {
+    if (raw.isEmpty) return [];
+    return raw
+        .split(',')
+        .map((e) => int.tryParse(e.trim()) ?? 0)
+        .where((e) => e > 0)
+        .toList();
   }
 }

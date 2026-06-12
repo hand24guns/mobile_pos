@@ -73,6 +73,7 @@ class _PackageDialogState extends State<PackageDialog> {
   late final Map<String, dynamic> _cachedAddonGroups;
 
   final TextEditingController _keteranganCtrl = TextEditingController();
+  final FocusNode _keteranganFocus = FocusNode();
 
   @override
   void initState() {
@@ -234,6 +235,7 @@ class _PackageDialogState extends State<PackageDialog> {
   @override
   void dispose() {
     _keteranganCtrl.dispose();
+    _keteranganFocus.dispose();
     super.dispose();
   }
 
@@ -723,6 +725,7 @@ class _PackageDialogState extends State<PackageDialog> {
         const SizedBox(height: 8),
         TextField(
           controller: _keteranganCtrl,
+          focusNode: _keteranganFocus,
           decoration: InputDecoration(
             hintText: 'Contoh: tanpa es, level pedas 2, dll.',
             hintStyle:
@@ -738,6 +741,8 @@ class _PackageDialogState extends State<PackageDialog> {
           maxLines: 2,
           textInputAction: TextInputAction.done,
           style: const TextStyle(fontSize: 13),
+          onSubmitted: (_) => _keteranganFocus.unfocus(),
+          onTapOutside: (_) => _keteranganFocus.unfocus(),
         ),
       ],
     );

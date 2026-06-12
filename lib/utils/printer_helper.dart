@@ -155,6 +155,9 @@ class PrinterHelper {
     final generator = Generator(PaperSize.mm58, profile);
     List<int> bytes = [];
 
+    // ── RESET printer — pastikan mulai dari state bersih ────────
+    bytes += generator.reset();
+
     // ── LOGO — sebelum nama toko ─────────────────────────────────
     // Cek lokal dulu, download jika belum ada, skip jika gagal
     if (logoFileName != null &&
@@ -415,28 +418,6 @@ class PrinterHelper {
     );
 
     bytes += generator.feed(1);
-
-    // ── WATERMARK ─────────────────────────────────────────────────
-    final now = DateTime.now();
-    final printAt =
-        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    bytes += generator.text(
-      'Print by Aibipi POS',
-      styles: const PosStyles(
-        align: PosAlign.center,
-        fontType: PosFontType.fontB,
-      ),
-    );
-    bytes += generator.text(
-      'on $printAt',
-      styles: const PosStyles(
-        align: PosAlign.center,
-        fontType: PosFontType.fontB,
-      ),
-    );
-
-    bytes += generator.feed(1);
     bytes += generator.cut();
 
     return await PrintBluetoothThermal.writeBytes(bytes);
@@ -471,6 +452,9 @@ class PrinterHelper {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
     List<int> bytes = [];
+
+    // ── RESET printer — pastikan mulai dari state bersih ────────
+    bytes += generator.reset();
 
     // ── HEADER KITCHEN ───────────────────────────────────────────
     bytes += generator.text(
@@ -609,28 +593,6 @@ class PrinterHelper {
     }
 
     bytes += generator.feed(1);
-
-    // ── WATERMARK ─────────────────────────────────────────────────
-    final now = DateTime.now();
-    final printAt =
-        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    bytes += generator.text(
-      'Print by Aibipi POS',
-      styles: const PosStyles(
-        align: PosAlign.center,
-        fontType: PosFontType.fontB,
-      ),
-    );
-    bytes += generator.text(
-      'on $printAt',
-      styles: const PosStyles(
-        align: PosAlign.center,
-        fontType: PosFontType.fontB,
-      ),
-    );
-
-    bytes += generator.feed(1);
     bytes += generator.cut();
 
     return await PrintBluetoothThermal.writeBytes(bytes);
@@ -758,6 +720,9 @@ class PrinterHelper {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
     List<int> bytes = [];
+
+    // ── RESET printer — pastikan mulai dari state bersih ────────
+    bytes += generator.reset();
 
     // ── LOGO ─────────────────────────────────────────────────────
     if (logoFileName != null &&
@@ -907,28 +872,6 @@ class PrinterHelper {
     bytes += generator.text(
       noteText,
       styles: const PosStyles(align: PosAlign.center),
-    );
-
-    bytes += generator.feed(1);
-
-    // ── WATERMARK ─────────────────────────────────────────────────
-    final now = DateTime.now();
-    final printAt =
-        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    bytes += generator.text(
-      'Print by Aibipi POS',
-      styles: const PosStyles(
-        align: PosAlign.center,
-        fontType: PosFontType.fontB,
-      ),
-    );
-    bytes += generator.text(
-      'on $printAt',
-      styles: const PosStyles(
-        align: PosAlign.center,
-        fontType: PosFontType.fontB,
-      ),
     );
 
     bytes += generator.feed(1);

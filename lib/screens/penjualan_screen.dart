@@ -10,6 +10,7 @@ import '../services/shift_service.dart';
 import '../models/cart_item.dart';
 import '../utils/currency_format.dart';
 import 'login_screen.dart';
+import 'home_screen.dart';
 import 'printer_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/printer_helper.dart';
@@ -70,7 +71,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   @override
   void initState() {
     super.initState();
-    _loadInitialData();
+    _loadMinimalData();
     _startShiftPolling();
   }
 
@@ -130,18 +131,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              setState(() {
-                _shiftID = 0;
-                _activeStoreID = 0;
-                _activeOrgID = 0;
-                _activeStoreName = '';
-                _isFnb = false;
-                _isLoading = true;
-                _waDisconnected = 0;
-                _waBannerDismissed = false;
-              });
-              _loadInitialData();
-              _startShiftPolling();
+              _goToHome();
             },
             style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1D273B)),
@@ -152,10 +142,19 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     );
   }
 
+  void _goToHome() {
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      (route) => false,
+    );
+  }
+
   // ============================================================
-  // LOAD INITIAL DATA
+  // PHASE 1 — Load session + store (tanpa shift check)
   // ============================================================
-  Future<void> _loadInitialData() async {
+  Future<void> _loadMinimalData() async {
     try {
       final session = await SessionService.getSession();
       _token = session['token'];
@@ -164,7 +163,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
       final dio = ApiService.getDio(token: _token);
 
-      // STEP 1 — Cek shift user aktif
+      // Cek apakah user sudah punya shift aktif
       final shiftUserRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'cekShiftUser',
@@ -176,19 +175,33 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       String storeName = '';
 
       if (shiftUserRes.data['has_shift'] == true) {
+        // User sudah punya shift → ambil data store dari shift
         storeID = shiftUserRes.data['store_id'];
         organisasiID = shiftUserRes.data['organisasi_id'];
         storeName = shiftUserRes.data['store_nama'];
         _shiftID = shiftUserRes.data['shift_id'];
         _isFnb = (shiftUserRes.data['is_fnb'] as int? ?? 0) == 1;
+
+        _activeStoreID = storeID;
+        _activeOrgID = organisasiID;
+        _activeStoreName = storeName;
+
+        // Langsung load data POS — tidak perlu cek shift lagi
+        await _loadPosData(
+          dio: dio,
+          storeID: storeID,
+          organisasiID: organisasiID,
+          storeName: storeName,
+        );
       } else {
-        // STEP 2 — Pilih store
+        // Belum punya shift → pilih store dulu, lalu shift check
         final storeRes = await dio.post('/penjualan.php',
             data: FormData.fromMap({
               'action': 'getStores',
               'user_id': _userID,
             }));
-        final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
+        final stores =
+            List<Map<String, dynamic>>.from(storeRes.data['data']);
 
         Map<String, dynamic>? pickedStore;
         if (stores.length == 1) {
@@ -197,7 +210,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           if (!mounted) return;
           pickedStore = await _showStorePicker(stores);
           if (pickedStore == null) {
-            await _logout();
+            // User cancel store picker → kembali ke HomeScreen
+            _goToHome();
             return;
           }
         }
@@ -213,111 +227,149 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
         _isFnb = (orgRes.data['is_fnb'] as int? ?? 0) == 1;
 
-        // STEP 3 — Cek shift store
-        final shiftRes = await ShiftService.cekShift(
-          token: _token,
+        _activeStoreID = storeID;
+        _activeOrgID = organisasiID;
+        _activeStoreName = storeName;
+
+        // Phase 2 — shift check + buka shift jika perlu
+        if (!mounted) return;
+        await _checkAndEnsureShift(
+          dio: dio,
           storeID: storeID,
           organisasiID: organisasiID,
-          userID: _userID,
+          storeName: storeName,
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ============================================================
+  // PHASE 2 — Cek shift, buka jika belum ada
+  // ============================================================
+  Future<void> _checkAndEnsureShift({
+    required Dio dio,
+    required int storeID,
+    required int organisasiID,
+    required String storeName,
+  }) async {
+    final shiftRes = await ShiftService.cekShift(
+      token: _token,
+      storeID: storeID,
+      organisasiID: organisasiID,
+      userID: _userID,
+    );
+
+    if (shiftRes.status == ShiftStatus.milikOrangLain) {
+      // Store sedang dipakai orang lain → notif → kembali ke HomeScreen
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          title: const Text('Store Sedang Digunakan'),
+          content: Text(
+            'Store $storeName sedang digunakan oleh ${shiftRes.kasirNama}.\n\n'
+            'Silakan pilih store lain atau minta kasir tersebut menutup shiftnya.',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1D273B)),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      _goToHome();
+      return;
+    }
+
+    if (shiftRes.status == ShiftStatus.tidakAda) {
+      // Belum ada shift → tampilkan bottom sheet buka shift (non-dismissible)
+      if (!mounted) return;
+      final shiftID = await _showBukaShiftSheet(
+        storeID: storeID,
+        organisasiID: organisasiID,
+        storeName: storeName,
+      );
+      if (shiftID == 0) {
+        // User tidak bisa dismiss sheet — ini seharusnya tidak terjadi,
+        // tapi sebagai safety net kembalikan ke HomeScreen
+        _goToHome();
+        return;
+      }
+      _shiftID = shiftID;
+    }
+
+    // Shift OK (tidakAda → sudah dibuka, atau milikSaya dari cekShift)
+    if (!mounted) return;
+    await _loadPosData(
+      dio: dio,
+      storeID: storeID,
+      organisasiID: organisasiID,
+      storeName: storeName,
+    );
+  }
+
+  // ============================================================
+  // PHASE 3 — Load data POS (number, channels, cara bayar)
+  // Dipanggil setelah shift dipastikan ada.
+  // ============================================================
+  Future<void> _loadPosData({
+    required Dio dio,
+    required int storeID,
+    required int organisasiID,
+    required String storeName,
+  }) async {
+    final numberRes = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getNumber',
+          'store_id': storeID,
+          'organisasi_id': organisasiID,
+          'device_token': _deviceToken,
+        }));
+    final number = numberRes.data['number'];
+
+    final channelRes = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getChannels',
+          'organisasi_id': organisasiID,
+        }));
+    _channels = List<Map<String, dynamic>>.from(channelRes.data['data']);
+
+    final caraBayarRes = await dio.post('/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getCaraBayar',
+          'organisasi_id': organisasiID,
+        }));
+    _caraBayarList =
+        List<Map<String, dynamic>>.from(caraBayarRes.data['data']);
+
+    ref.read(penjualanProvider.notifier).setInitialData(
+          number: number,
+          storeID: storeID,
+          storeName: storeName,
+          organisasiID: organisasiID,
+          salesTipeID:
+              int.parse(_channels.first['dim_salestipe_id'].toString()),
         );
 
-        if (shiftRes.status == ShiftStatus.milikOrangLain) {
-          if (mounted) {
-            await showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (_) => AlertDialog(
-                title: const Text('Store Sedang Digunakan'),
-                content: Text(
-                  'Store $storeName sedang digunakan oleh ${shiftRes.kasirNama}.\n\n'
-                  'Silahkan pilih store lain atau minta kasir tersebut menutup shiftnya.',
-                ),
-                actions: [
-                  ElevatedButton(
-                    onPressed: () async {
-                      Navigator.pop(context);
-                      await _logout();
-                    },
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1D273B)),
-                    child:
-                        const Text('OK', style: TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            );
-            // Tidak perlu _loadInitialData() — sudah logout
-            return;
-          }
-        }
-
-        if (shiftRes.status == ShiftStatus.tidakAda) {
-          if (!mounted) return;
-          final shiftID = await _showBukaShiftDialog(
-            storeID: storeID,
-            organisasiID: organisasiID,
-          );
-          if (shiftID == 0) {
-            await _logout();
-            return;
-          }
-          _shiftID = shiftID;
-        }
-      }
-
-      // STEP 4 — Load number, channels, cara bayar
-      final numberRes = await dio.post('/penjualan.php',
+    // WA banner
+    try {
+      final storeDataRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
-            'action': 'getNumber',
+            'action': 'getStoreData',
             'store_id': storeID,
-            'organisasi_id': organisasiID,
-            'device_token': _deviceToken,
           }));
-      final number = numberRes.data['number'];
+      _waDisconnected =
+          (storeDataRes.data['wa_disconnected'] as num? ?? 0).toInt();
+    } catch (_) {}
 
-      final channelRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getChannels',
-            'organisasi_id': organisasiID,
-          }));
-      _channels = List<Map<String, dynamic>>.from(channelRes.data['data']);
-
-      final caraBayarRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getCaraBayar',
-            'organisasi_id': organisasiID,
-          }));
-      _caraBayarList =
-          List<Map<String, dynamic>>.from(caraBayarRes.data['data']);
-
-      ref.read(penjualanProvider.notifier).setInitialData(
-            number: number,
-            storeID: storeID,
-            storeName: storeName,
-            organisasiID: organisasiID,
-            salesTipeID:
-                int.parse(_channels.first['dim_salestipe_id'].toString()),
-          );
-
-      _activeStoreID = storeID;
-      _activeOrgID = organisasiID;
-      _activeStoreName = storeName;
-
-      // Load status WA untuk banner — cek apakah WA aktif tapi server belum dikonfigurasi
-      try {
-        final storeDataRes = await dio.post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getStoreData',
-              'store_id': storeID,
-            }));
-        _waDisconnected = (storeDataRes.data['wa_disconnected'] as num? ?? 0).toInt();
-      } catch (_) {}
-
-      setState(() => _isLoading = false);
-      _loadImageProducts();
-    } catch (e, st) {
-      setState(() => _isLoading = false);
-    }
+    if (mounted) setState(() => _isLoading = false);
+    _loadImageProducts();
   }
 
   Future<void> _logout() async {
@@ -558,6 +610,124 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   // ============================================================
+  // BUKA SHIFT — Bottom Sheet blocker (dari flow V2.1)
+  // Non-dismissible: user HARUS buka shift untuk lanjut ke POS.
+  // Dipanggil dari _checkAndEnsureShift ketika shift belum ada.
+  // ============================================================
+  Future<int> _showBukaShiftSheet({
+    required int storeID,
+    required int organisasiID,
+    required String storeName,
+  }) async {
+    final modalController = TextEditingController(text: '0');
+    final completer = Completer<int>();
+
+    if (!mounted) return 0;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom,
+        ),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // Icon + judul
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1D273B).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.lock_clock,
+                        color: Color(0xFF1D273B), size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Shift Belum Dibuka',
+                          style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1D273B)),
+                        ),
+                        Text(
+                          storeName,
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Text('Modal kasir awal:',
+                  style: TextStyle(fontSize: 13, color: Colors.grey)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: modalController,
+                keyboardType: TextInputType.number,
+                autofocus: false,
+                decoration: const InputDecoration(
+                  labelText: 'Modal Kasir',
+                  border: OutlineInputBorder(),
+                  prefixText: 'Rp ',
+                ),
+              ),
+              const SizedBox(height: 20),
+              _BukaShiftButton(
+                token: _token,
+                storeID: storeID,
+                organisasiID: organisasiID,
+                userID: _userID,
+                modalController: modalController,
+                onSuccess: (shiftID) {
+                  completer.complete(shiftID);
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Jika sheet ditutup tanpa complete (seharusnya tidak terjadi karena
+    // isDismissible:false), kembalikan 0 sebagai safety net.
+    return completer.isCompleted ? completer.future : Future.value(0);
+  }
+
+  // ============================================================
   // TUTUP SHIFT
   // ============================================================
   Future<void> _tutupShift() async {
@@ -643,7 +813,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _logout();
+                _goToHome();
               },
               style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1D273B)),
@@ -2277,6 +2447,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         }));
 
     if (res.data['success'] == true) {
+      // Restore nomor asli pending ke state — satu transaksi satu nomor dari awal sampai selesai
+      final restoredNumber = res.data['number'] as String? ?? state.number;
+      ref.read(penjualanProvider.notifier).setInitialData(
+            number: restoredNumber,
+            storeID: state.storeID,
+            storeName: state.storeName,
+            organisasiID: state.organisasiID,
+            salesTipeID: state.salesTipeID,
+          );
+
       // Set member
       final memberID = res.data['member_id'];
       if (memberID != null && int.parse(memberID.toString()) > 0) {
@@ -2305,7 +2485,6 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         }
       }
 
-      // Update number + device_token di temp_invoice (sudah dilakukan di PHP)
       // Simpan ID pending order yang sedang aktif agar bisa di-update (bukan insert baru)
       setState(() {
         _activePendingOrderID = salesOrderID;
@@ -4097,5 +4276,91 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               ],
             ),
     );
+  }
+}
+
+// ============================================================
+// _BukaShiftButton — tombol dengan loading state sendiri
+// Dipakai di dalam _showBukaShiftSheet (bottom sheet).
+// ============================================================
+class _BukaShiftButton extends StatefulWidget {
+  final String token;
+  final int storeID;
+  final int organisasiID;
+  final int userID;
+  final TextEditingController modalController;
+  final void Function(int shiftID) onSuccess;
+
+  const _BukaShiftButton({
+    required this.token,
+    required this.storeID,
+    required this.organisasiID,
+    required this.userID,
+    required this.modalController,
+    required this.onSuccess,
+  });
+
+  @override
+  State<_BukaShiftButton> createState() => _BukaShiftButtonState();
+}
+
+class _BukaShiftButtonState extends State<_BukaShiftButton> {
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: _isLoading ? null : _handleTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF1D273B),
+        minimumSize: const Size.fromHeight(48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      child: _isLoading
+          ? const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(
+                  color: Colors.white, strokeWidth: 2),
+            )
+          : const Text(
+              'Buka Shift',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15),
+            ),
+    );
+  }
+
+  Future<void> _handleTap() async {
+    setState(() => _isLoading = true);
+
+    final modal = double.tryParse(
+          widget.modalController.text.replaceAll(',', '').trim(),
+        ) ??
+        0;
+
+    final shiftID = await ShiftService.bukaShift(
+      token: widget.token,
+      storeID: widget.storeID,
+      organisasiID: widget.organisasiID,
+      userID: widget.userID,
+      modalKasir: modal,
+    );
+
+    if (!mounted) return;
+
+    if (shiftID == 0) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Gagal buka shift'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } else {
+      widget.onSuccess(shiftID);
+    }
   }
 }
