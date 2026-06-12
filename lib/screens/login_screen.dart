@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
-import '../services/session_service.dart';
-import 'penjualan_screen.dart';
+import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -34,17 +33,11 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (result['success'] == true) {
-      await SessionService.saveSession(
-        token: result['token'],
-        userID: result['user_id'],
-        nama: result['nama'],
-        username: result['username'],
-      );
-
+      // Session sudah disimpan oleh AuthService.login (termasuk outlets)
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const PenjualanScreen()),
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
         );
       }
     } else {
