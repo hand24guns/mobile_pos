@@ -18,6 +18,7 @@ import 'invoice_list_screen.dart';
 // ── Widget baru ───────────────────────────────────────────────
 import '../widgets/package_dialog.dart';
 import '../widgets/add_member_sheet.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class PenjualanScreen extends ConsumerStatefulWidget {
   const PenjualanScreen({super.key});
@@ -67,6 +68,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // Struktur: [ { 'id': int, 'nama': String, 'produk': [ {kode,nama,hpj,image} ] } ]
   List<Map<String, dynamic>> _imageCategories = [];
   bool _isLoadingImages = false;
+
+  // ── Anti-double-tap guard untuk image grid ────────────────────
+  // Kode yang sedang diproses tidak bisa di-tap lagi sampai selesai.
+  final Set<String> _processingKodes = {};
 
   @override
   void initState() {
@@ -134,7 +139,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               _goToHome();
             },
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1D273B)),
+              backgroundColor: const Color(0xFF1D273B),
+            ),
             child: const Text('OK', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -164,11 +170,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final dio = ApiService.getDio(token: _token);
 
       // Cek apakah user sudah punya shift aktif
-      final shiftUserRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'cekShiftUser',
-            'user_id': _userID,
-          }));
+      final shiftUserRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
+      );
 
       int storeID = 0;
       int organisasiID = 0;
@@ -195,13 +200,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         );
       } else {
         // Belum punya shift → pilih store dulu, lalu shift check
-        final storeRes = await dio.post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getStores',
-              'user_id': _userID,
-            }));
-        final stores =
-            List<Map<String, dynamic>>.from(storeRes.data['data']);
+        final storeRes = await dio.post(
+          '/penjualan.php',
+          data: FormData.fromMap({'action': 'getStores', 'user_id': _userID}),
+        );
+        final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
 
         Map<String, dynamic>? pickedStore;
         if (stores.length == 1) {
@@ -219,11 +222,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         storeID = int.parse(pickedStore['id'].toString());
         storeName = pickedStore['nama'].toString();
 
-        final orgRes = await dio.post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getOrganisasiID',
-              'store_id': storeID,
-            }));
+        final orgRes = await dio.post(
+          '/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getOrganisasiID',
+            'store_id': storeID,
+          }),
+        );
         organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
         _isFnb = (orgRes.data['is_fnb'] as int? ?? 0) == 1;
 
@@ -277,7 +282,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ElevatedButton(
               onPressed: () => Navigator.pop(context),
               style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1D273B)),
+                backgroundColor: const Color(0xFF1D273B),
+              ),
               child: const Text('OK', style: TextStyle(color: Colors.white)),
             ),
           ],
@@ -324,46 +330,53 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     required int organisasiID,
     required String storeName,
   }) async {
-    final numberRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getNumber',
-          'store_id': storeID,
-          'organisasi_id': organisasiID,
-          'device_token': _deviceToken,
-        }));
+    final numberRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getNumber',
+        'store_id': storeID,
+        'organisasi_id': organisasiID,
+        'device_token': _deviceToken,
+      }),
+    );
     final number = numberRes.data['number'];
 
-    final channelRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getChannels',
-          'organisasi_id': organisasiID,
-        }));
-    _channels = List<Map<String, dynamic>>.from(channelRes.data['data']);
+    final channelRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getChannels',
+        'organisasi_id': organisasiID,
+      }),
+    );
+    _channels = List<Map<String, dynamic>>.from(channelRes.data['data'] ?? []);
 
-    final caraBayarRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getCaraBayar',
-          'organisasi_id': organisasiID,
-        }));
-    _caraBayarList =
-        List<Map<String, dynamic>>.from(caraBayarRes.data['data']);
+    final caraBayarRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getCaraBayar',
+        'organisasi_id': organisasiID,
+      }),
+    );
+    _caraBayarList = List<Map<String, dynamic>>.from(
+      caraBayarRes.data['data'] ?? [],
+    );
 
     ref.read(penjualanProvider.notifier).setInitialData(
           number: number,
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID:
-              int.parse(_channels.first['dim_salestipe_id'].toString()),
+          salesTipeID: _channels.isNotEmpty
+              ? int.parse(_channels.first['dim_salestipe_id'].toString())
+              : 0,
         );
 
     // WA banner
     try {
-      final storeDataRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStoreData',
-            'store_id': storeID,
-          }));
+      final storeDataRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({'action': 'getStoreData', 'store_id': storeID}),
+      );
       _waDisconnected =
           (storeDataRes.data['wa_disconnected'] as num? ?? 0).toInt();
     } catch (_) {}
@@ -386,7 +399,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // STORE PICKER — Modal Bottom Sheet
   // ============================================================
   Future<Map<String, dynamic>?> _showStorePicker(
-      List<Map<String, dynamic>> stores) async {
+    List<Map<String, dynamic>> stores,
+  ) async {
     Map<String, dynamic>? selected;
     return showModalBottomSheet<Map<String, dynamic>>(
       context: context,
@@ -422,23 +436,32 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     const Icon(Icons.store, color: Color(0xFF1D273B), size: 22),
                     const SizedBox(width: 10),
                     const Expanded(
-                      child: Text('Pilih Store',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1D273B))),
-                    ),
-                    Text('${stores.length} store',
+                      child: Text(
+                        'Pilih Store',
                         style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade500)),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1D273B),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${stores.length} store',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
                   ],
                 ),
               ),
               const Divider(height: 1),
               Flexible(
                 child: ListView.separated(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   shrinkWrap: true,
                   itemCount: stores.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 6),
@@ -452,7 +475,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
                         decoration: BoxDecoration(
                           color: isSelected
                               ? const Color(0xFF1D273B)
@@ -476,20 +501,25 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: Text(s['nama'].toString(),
-                                  style: TextStyle(
-                                    color: isSelected
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    fontWeight: isSelected
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                    fontSize: 15,
-                                  )),
+                              child: Text(
+                                s['nama'].toString(),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  fontSize: 15,
+                                ),
+                              ),
                             ),
                             if (isSelected)
-                              const Icon(Icons.check_circle,
-                                  color: Colors.white, size: 18),
+                              const Icon(
+                                Icons.check_circle,
+                                color: Colors.white,
+                                size: 18,
+                              ),
                           ],
                         ),
                       ),
@@ -516,13 +546,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                             ? null
                             : () => Navigator.pop(ctx, selected),
                         style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1D273B)),
+                          backgroundColor: const Color(0xFF1D273B),
+                        ),
                         child: Text(
                           selected == null
                               ? 'Pilih Store'
                               : 'Masuk ke ${selected!['nama']}',
                           style: const TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.bold),
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -555,8 +588,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Input modal kasir awal:',
-                style: TextStyle(color: Colors.grey)),
+            const Text(
+              'Input modal kasir awal:',
+              style: TextStyle(color: Colors.grey),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: modalController,
@@ -572,14 +607,18 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Batal')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1D273B)),
-            child:
-                const Text('Buka Shift', style: TextStyle(color: Colors.white)),
+              backgroundColor: const Color(0xFF1D273B),
+            ),
+            child: const Text(
+              'Buka Shift',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -587,10 +626,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
     if (confirm != true) return 0;
 
-    final modal = double.tryParse(
-          modalController.text.replaceAll(',', '').trim(),
-        ) ??
-        0;
+    final modal =
+        double.tryParse(modalController.text.replaceAll(',', '').trim()) ?? 0;
 
     final shiftID = await ShiftService.bukaShift(
       token: _token,
@@ -603,7 +640,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     if (shiftID == 0 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Gagal buka shift'), backgroundColor: Colors.red),
+          content: Text('Gagal buka shift'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
     return shiftID;
@@ -631,9 +670,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       enableDrag: false,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom,
-        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: Container(
           decoration: const BoxDecoration(
             color: Colors.white,
@@ -662,11 +699,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1D273B).withOpacity(0.08),
+                      color: const Color(0xFF1D273B).withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.lock_clock,
-                        color: Color(0xFF1D273B), size: 22),
+                    child: const Icon(
+                      Icons.lock_clock,
+                      color: Color(0xFF1D273B),
+                      size: 22,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -676,14 +716,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                         const Text(
                           'Shift Belum Dibuka',
                           style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1D273B)),
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1D273B),
+                          ),
                         ),
                         Text(
                           storeName,
                           style: TextStyle(
-                              fontSize: 13, color: Colors.grey.shade600),
+                            fontSize: 13,
+                            color: Colors.grey.shade600,
+                          ),
                         ),
                       ],
                     ),
@@ -691,8 +734,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ],
               ),
               const SizedBox(height: 20),
-              const Text('Modal kasir awal:',
-                  style: TextStyle(fontSize: 13, color: Colors.grey)),
+              const Text(
+                'Modal kasir awal:',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: modalController,
@@ -761,19 +806,24 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             _rekapRow('Total Sales', 'Rp ${CurrencyFormat.format(totalSales)}'),
             const Divider(),
             const SizedBox(height: 8),
-            const Text('Yakin ingin menutup shift?',
-                style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'Yakin ingin menutup shift?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Batal')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Tutup Shift',
-                style: TextStyle(color: Colors.white)),
+            child: const Text(
+              'Tutup Shift',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -803,10 +853,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             children: [
               const Icon(Icons.check_circle, color: Colors.green, size: 56),
               const SizedBox(height: 16),
-              Text('Total Sales: Rp ${CurrencyFormat.format(totalSales)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              Text('$jumlahInv transaksi',
-                  style: const TextStyle(color: Colors.grey)),
+              Text(
+                'Total Sales: Rp ${CurrencyFormat.format(totalSales)}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                '$jumlahInv transaksi',
+                style: const TextStyle(color: Colors.grey),
+              ),
             ],
           ),
           actions: [
@@ -816,9 +870,12 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 _goToHome();
               },
               style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1D273B)),
-              child:
-                  const Text('Selesai', style: TextStyle(color: Colors.white)),
+                backgroundColor: const Color(0xFF1D273B),
+              ),
+              child: const Text(
+                'Selesai',
+                style: TextStyle(color: Colors.white),
+              ),
             ),
           ],
         ),
@@ -826,7 +883,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Gagal menutup shift'), backgroundColor: Colors.red),
+          content: Text('Gagal menutup shift'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -850,13 +909,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'searchProduk',
-          'term': sku,
-          'organisasi_id': state.organisasiID,
-          'salestipe_id': state.salesTipeID,
-        }));
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'searchProduk',
+        'term': sku,
+        'organisasi_id': state.organisasiID,
+        'salestipe_id': state.salesTipeID,
+      }),
+    );
 
     final data = List<Map<String, dynamic>>.from(res.data['data']);
     if (data.isEmpty) {
@@ -882,75 +943,82 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // warning/notice sebelum JSON — bersihkan string lalu parse.
   // ============================================================
   Future<void> _insertProduk(String sku) async {
-    final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
+    // ── Guard: abaikan tap jika kode ini sedang diproses ──
+    if (_processingKodes.contains(sku)) return;
+    if (mounted) setState(() => _processingKodes.add(sku));
 
-    Map<String, dynamic> cekData;
     try {
-      final rawRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'cekPackage',
-          'sku': sku,
-          'organisasi_id': state.organisasiID,
-          'salestipe_id': state.salesTipeID,
-        }),
-        options: Options(responseType: ResponseType.plain),
-      );
+      final state = ref.read(penjualanProvider);
+      final dio = ApiService.getDio(token: _token);
 
-      final rawStr = rawRes.data?.toString() ?? '';
+      Map<String, dynamic> cekData;
+      try {
+        final rawRes = await dio.post(
+          '/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'cekPackage',
+            'sku': sku,
+            'organisasi_id': state.organisasiID,
+            'salestipe_id': state.salesTipeID,
+          }),
+          options: Options(responseType: ResponseType.plain),
+        );
 
-      // Buang karakter sebelum '{'  (PHP notice / BOM / whitespace)
-      final jsonStart = rawStr.indexOf('{');
-      if (jsonStart < 0) {
-        // Response tidak valid — fallback insert biasa
-        debugPrint('[cekPackage] Response tidak valid (no JSON): $rawStr');
+        final rawStr = rawRes.data?.toString() ?? '';
+        final jsonStart = rawStr.indexOf('{');
+        if (jsonStart < 0) {
+          debugPrint('[cekPackage] Response tidak valid (no JSON): $rawStr');
+          await _doInsertProduk(sku);
+          return;
+        }
+        final cleanStr = rawStr.substring(jsonStart);
+        final decoded = jsonDecode(cleanStr);
+        if (decoded is! Map) {
+          debugPrint('[cekPackage] JSON bukan Map: $cleanStr');
+          await _doInsertProduk(sku);
+          return;
+        }
+        cekData = Map<String, dynamic>.from(decoded);
+      } on DioException catch (e) {
+        debugPrint('[cekPackage] DioException: ${e.message}');
+        await _doInsertProduk(sku);
+        return;
+      } catch (e) {
+        debugPrint('[cekPackage] Exception: $e');
         await _doInsertProduk(sku);
         return;
       }
-      final cleanStr = rawStr.substring(jsonStart);
-      final decoded = jsonDecode(cleanStr);
-      if (decoded is! Map) {
-        debugPrint('[cekPackage] JSON bukan Map: $cleanStr');
+
+      final isPackage =
+          cekData['is_package'] == true || cekData['is_package'] == 1;
+
+      if (isPackage) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => PackageDialog(
+            sku: sku,
+            packageData: cekData,
+            onConfirm: (isianDipilih, addonDipilih, addonTotal, keterangan) {
+              _doInsertPackage(
+                sku: sku,
+                isianDipilih: isianDipilih,
+                addonDipilih: addonDipilih,
+                addonTotal: addonTotal,
+                keterangan: keterangan,
+              );
+            },
+          ),
+        );
+        // Untuk package: lock dilepas setelah dialog muncul,
+        // bukan setelah insert — karena insert terjadi dari callback dialog.
+      } else {
         await _doInsertProduk(sku);
-        return;
       }
-      cekData = Map<String, dynamic>.from(decoded);
-    } on DioException catch (e) {
-      debugPrint('[cekPackage] DioException: ${e.message}');
-      await _doInsertProduk(sku);
-      return;
-    } catch (e) {
-      debugPrint('[cekPackage] Exception: $e');
-      await _doInsertProduk(sku);
-      return;
-    }
-
-    // is_package dari PHP bisa berupa bool true atau int 1 (TINYINT MySQL)
-    final isPackage =
-        cekData['is_package'] == true || cekData['is_package'] == 1;
-
-    if (isPackage) {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => PackageDialog(
-          sku: sku,
-          packageData: cekData,
-          onConfirm: (isianDipilih, addonDipilih, addonTotal, keterangan) {
-            _doInsertPackage(
-              sku: sku,
-              isianDipilih: isianDipilih,
-              addonDipilih: addonDipilih,
-              addonTotal: addonTotal,
-              keterangan: keterangan,
-            );
-          },
-        ),
-      );
-    } else {
-      await _doInsertProduk(sku);
+    } finally {
+      // Lock selalu dilepas, apapun yang terjadi
+      if (mounted) setState(() => _processingKodes.remove(sku));
     }
   }
 
@@ -959,18 +1027,20 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'insertItem',
-          'number': state.number,
-          'sku': sku,
-          'organisasi_id': state.organisasiID,
-          'store_id': state.storeID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'salestipe_id': state.salesTipeID,
-        }));
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'insertItem',
+        'number': state.number,
+        'sku': sku,
+        'organisasi_id': state.organisasiID,
+        'store_id': state.storeID,
+        'member_id': state.memberID ?? 0,
+        'voucher': _activeVoucher,
+        'device_token': _deviceToken,
+        'salestipe_id': state.salesTipeID,
+      }),
+    );
 
     if (res.data['success'] == true) {
       _checkVoucherValid(res.data);
@@ -999,22 +1069,24 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'insertPackage',
-          'number': state.number,
-          'sku': sku,
-          'organisasi_id': state.organisasiID,
-          'store_id': state.storeID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'isian': jsonEncode(isianDipilih),
-          'addon': jsonEncode(addonDipilih),
-          'addon_harga': addonTotal,
-          'keterangan': keterangan,
-          'salestipe_id': state.salesTipeID,
-        }));
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'insertPackage',
+        'number': state.number,
+        'sku': sku,
+        'organisasi_id': state.organisasiID,
+        'store_id': state.storeID,
+        'member_id': state.memberID ?? 0,
+        'voucher': _activeVoucher,
+        'device_token': _deviceToken,
+        'isian': jsonEncode(isianDipilih),
+        'addon': jsonEncode(addonDipilih),
+        'addon_harga': addonTotal,
+        'keterangan': keterangan,
+        'salestipe_id': state.salesTipeID,
+      }),
+    );
 
     if (res.data['success'] == true) {
       _checkVoucherValid(res.data);
@@ -1023,8 +1095,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text(res.data['message'] ?? 'Gagal menambahkan produk package'),
+            content: Text(
+              res.data['message'] ?? 'Gagal menambahkan produk package',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -1041,8 +1114,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content:
-                Text('Voucher dilepas — total belanja tidak memenuhi syarat'),
+            content: Text(
+              'Voucher dilepas — total belanja tidak memenuhi syarat',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -1057,23 +1131,27 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final itemsRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getItems',
-          'number': state.number,
-          'device_token': _deviceToken,
-        }));
+    final itemsRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getItems',
+        'number': state.number,
+        'device_token': _deviceToken,
+      }),
+    );
 
     final itemsData = List<Map<String, dynamic>>.from(itemsRes.data['data']);
     final items = itemsData.map((e) => CartItem.fromJson(e)).toList();
 
-    final summaryRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getSummary',
-          'number': state.number,
-          'store_id': state.storeID,
-          'device_token': _deviceToken,
-        }));
+    final summaryRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getSummary',
+        'number': state.number,
+        'store_id': state.storeID,
+        'device_token': _deviceToken,
+      }),
+    );
 
     final summary = summaryRes.data;
     ref.read(penjualanProvider.notifier).updateItems(items);
@@ -1118,28 +1196,48 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final rawData = parsed['data'];
       if (rawData is List) {
         final categories = rawData
-            .map<Map<String, dynamic>>((cat) => {
-                  'id': cat['id'] ?? 0,
-                  'nama': cat['nama']?.toString() ?? '',
-                  'produk': (cat['produk'] as List? ?? [])
-                      .map<Map<String, dynamic>>((p) => {
-                            'kode': p['kode']?.toString() ?? '',
-                            'nama': p['nama']?.toString() ?? '',
-                            'hpj': (p['hpj'] as num? ?? 0).toDouble(),
-                            'image': p['image']?.toString() ?? '',
-                            'is_package':
-                                p['is_package'] == true || p['is_package'] == 1,
-                          })
-                      .where((p) => p['image']!.isNotEmpty)
-                      .toList(),
-                })
+            .map<Map<String, dynamic>>(
+              (cat) => {
+                'id': cat['id'] ?? 0,
+                'nama': cat['nama']?.toString() ?? '',
+                'produk': (cat['produk'] as List? ?? [])
+                    .map<Map<String, dynamic>>(
+                      (p) => {
+                        'kode': p['kode']?.toString() ?? '',
+                        'nama': p['nama']?.toString() ?? '',
+                        'hpj': (p['hpj'] as num? ?? 0).toDouble(),
+                        'image': p['image']?.toString() ?? '',
+                        'is_package':
+                            p['is_package'] == true || p['is_package'] == 1,
+                      },
+                    )
+                    .where((p) => p['image']!.isNotEmpty)
+                    .toList(),
+              },
+            )
             .where((cat) => (cat['produk'] as List).isNotEmpty)
             .toList();
-        if (mounted) setState(() => _imageCategories = categories);
+        if (mounted) {
+          setState(() => _imageCategories = categories);
+          _prewarmImageCache();
+        }
       }
     } catch (e) {
     } finally {
       if (mounted) setState(() => _isLoadingImages = false);
+    }
+  }
+
+  /// Pre-warm: decode gambar ke memory di background setelah grid dimuat,
+  /// agar saat pertama kali tab dibuka sudah siap render.
+  void _prewarmImageCache() {
+    for (final cat in _imageCategories) {
+      for (final p in (cat['produk'] as List<Map<String, dynamic>>)) {
+        final url = p['image']?.toString() ?? '';
+        if (url.isNotEmpty) {
+          precacheImage(CachedNetworkImageProvider(url), context);
+        }
+      }
     }
   }
 
@@ -1172,18 +1270,20 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final dio = ApiService.getDio(token: _token);
     final item = state.items[index];
 
-    await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'deleteItem',
-          'number': state.number,
-          'sku': item.kode,
-          'packages_notes': item.packagesNotes ?? '',
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-        }));
+    await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'deleteItem',
+        'number': state.number,
+        'sku': item.kode,
+        'packages_notes': item.packagesNotes ?? '',
+        'store_id': state.storeID,
+        'organisasi_id': state.organisasiID,
+        'member_id': state.memberID ?? 0,
+        'voucher': _activeVoucher,
+        'device_token': _deviceToken,
+      }),
+    );
 
     await _refreshFromApi();
   }
@@ -1197,20 +1297,22 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final dio = ApiService.getDio(token: _token);
     final item = state.items[index];
 
-    await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'updateQty',
-          'number': state.number,
-          'sku': item.kode,
-          'qty': qty,
-          'packages_notes': item.packagesNotes ?? '',
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'salestipe_id': state.salesTipeID,
-        }));
+    await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'updateQty',
+        'number': state.number,
+        'sku': item.kode,
+        'qty': qty,
+        'packages_notes': item.packagesNotes ?? '',
+        'store_id': state.storeID,
+        'organisasi_id': state.organisasiID,
+        'member_id': state.memberID ?? 0,
+        'voucher': _activeVoucher,
+        'device_token': _deviceToken,
+        'salestipe_id': state.salesTipeID,
+      }),
+    );
 
     await _refreshFromApi();
   }
@@ -1220,15 +1322,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final dio = ApiService.getDio(token: _token);
     final item = state.items[index];
 
-    await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'updateItemKeterangan',
-          'number': state.number,
-          'sku': item.kode,
-          'packages_notes': item.packagesNotes ?? '',
-          'keterangan': keterangan,
-          'device_token': _deviceToken,
-        }));
+    await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'updateItemKeterangan',
+        'number': state.number,
+        'sku': item.kode,
+        'packages_notes': item.packagesNotes ?? '',
+        'keterangan': keterangan,
+        'device_token': _deviceToken,
+      }),
+    );
 
     // Dispose controller lama agar re-init dengan teks terbaru setelah refresh
     _itemNotesControllers[index]?.dispose();
@@ -1257,16 +1361,18 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
           // Recalculate diskon dengan member baru
           final dio = ApiService.getDio(token: _token);
-          await dio.post('/penjualan.php',
-              data: FormData.fromMap({
-                'action': 'recalculate',
-                'number': state.number,
-                'store_id': state.storeID,
-                'organisasi_id': state.organisasiID,
-                'member_id': memberID,
-                'voucher': _activeVoucher,
-                'device_token': _deviceToken,
-              }));
+          await dio.post(
+            '/penjualan.php',
+            data: FormData.fromMap({
+              'action': 'recalculate',
+              'number': state.number,
+              'store_id': state.storeID,
+              'organisasi_id': state.organisasiID,
+              'member_id': memberID,
+              'voucher': _activeVoucher,
+              'device_token': _deviceToken,
+            }),
+          );
 
           await _refreshFromApi();
 
@@ -1306,15 +1412,20 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Aktif: $_activeVoucher',
-                        style: const TextStyle(color: Colors.indigo)),
+                    Text(
+                      'Aktif: $_activeVoucher',
+                      style: const TextStyle(color: Colors.indigo),
+                    ),
                     GestureDetector(
                       onTap: () async {
                         Navigator.pop(context);
                         await _removeVoucher();
                       },
-                      child:
-                          const Icon(Icons.close, size: 18, color: Colors.red),
+                      child: const Icon(
+                        Icons.close,
+                        size: 18,
+                        color: Colors.red,
+                      ),
                     ),
                   ],
                 ),
@@ -1331,8 +1442,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
           ElevatedButton(
             onPressed: () async {
               final kode = voucherController.text.trim();
@@ -1351,16 +1463,18 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'cekVoucher',
-          'number': state.number,
-          'voucher': kode,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'device_token': _deviceToken,
-        }));
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'cekVoucher',
+        'number': state.number,
+        'voucher': kode,
+        'store_id': state.storeID,
+        'organisasi_id': state.organisasiID,
+        'member_id': state.memberID ?? 0,
+        'device_token': _deviceToken,
+      }),
+    );
 
     if (res.data['success'] == true) {
       setState(() => _activeVoucher = kode);
@@ -1389,30 +1503,34 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'resetDiskon',
-          'number': state.number,
-          'device_token': _deviceToken,
-        }));
+    await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'resetDiskon',
+        'number': state.number,
+        'device_token': _deviceToken,
+      }),
+    );
 
-    await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'recalculate',
-          'number': state.number,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'voucher': '',
-          'device_token': _deviceToken,
-        }));
+    await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'recalculate',
+        'number': state.number,
+        'store_id': state.storeID,
+        'organisasi_id': state.organisasiID,
+        'member_id': state.memberID ?? 0,
+        'voucher': '',
+        'device_token': _deviceToken,
+      }),
+    );
 
     setState(() => _activeVoucher = '');
     await _refreshFromApi();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Voucher dilepas')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Voucher dilepas')));
     }
   }
 
@@ -1435,8 +1553,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
           ElevatedButton(
             onPressed: () async {
               final nomor = returController.text.trim();
@@ -1456,13 +1575,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final cekRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'cekRetur',
-          'retur_number': returNumber,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-        }));
+    final cekRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'cekRetur',
+        'retur_number': returNumber,
+        'store_id': state.storeID,
+        'organisasi_id': state.organisasiID,
+      }),
+    );
 
     if (cekRes.data['success'] != true) {
       if (mounted) {
@@ -1476,15 +1597,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       return;
     }
 
-    final loadRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'loadRetur',
-          'retur_number': returNumber,
-          'number': state.number,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'device_token': _deviceToken,
-        }));
+    final loadRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'loadRetur',
+        'retur_number': returNumber,
+        'number': state.number,
+        'store_id': state.storeID,
+        'organisasi_id': state.organisasiID,
+        'device_token': _deviceToken,
+      }),
+    );
 
     if (loadRes.data['success'] == true) {
       ref.read(penjualanProvider.notifier).setReturSource(returNumber);
@@ -1516,18 +1639,21 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
 
     if (state.items.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Belum ada produk')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Belum ada produk')));
       return;
     }
     if (state.caraBayarID == 0) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Pilih cara bayar dulu')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Pilih cara bayar dulu')));
       return;
     }
     if (state.nominalBayar < state.total) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Nominal bayar kurang dari total')));
+        const SnackBar(content: Text('Nominal bayar kurang dari total')),
+      );
       return;
     }
 
@@ -1538,37 +1664,53 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Total'),
-              Text('Rp ${CurrencyFormat.format(state.total)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-            ]),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Bayar'),
-              Text('Rp ${CurrencyFormat.format(state.nominalBayar)}'),
-            ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Total'),
+                Text(
+                  'Rp ${CurrencyFormat.format(state.total)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Bayar'),
+                Text('Rp ${CurrencyFormat.format(state.nominalBayar)}'),
+              ],
+            ),
             const Divider(),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Kembalian',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              Text(
-                'Rp ${CurrencyFormat.format(state.nominalBayar - state.total)}',
-                style: const TextStyle(
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Kembalian',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  'Rp ${CurrencyFormat.format(state.nominalBayar - state.total)}',
+                  style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
-                    color: Color(0xFF1D273B)),
-              ),
-            ]),
+                    color: Color(0xFF1D273B),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Batal')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1D273B)),
+              backgroundColor: const Color(0xFF1D273B),
+            ),
             child: const Text('Proses', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -1587,22 +1729,24 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final session = await SessionService.getSession();
       final dio = ApiService.getDio(token: _token);
 
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'prosesBayar',
-            'number': state.number,
-            'cara_bayar_id': state.caraBayarID,
-            'store_id': state.storeID,
-            'organisasi_id': state.organisasiID,
-            'user_id': session['user_id'],
-            'sales_tipe_id': state.salesTipeID,
-            'member_id': state.memberID ?? 0,
-            'voucher': _activeVoucher,
-            'retur_source': ref.read(penjualanProvider).returSource,
-            'nominal_bayar': state.nominalBayar,
-            'device_token': _deviceToken,
-            'keterangan': _keteranganController.text.trim(),
-          }));
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'prosesBayar',
+          'number': state.number,
+          'cara_bayar_id': state.caraBayarID,
+          'store_id': state.storeID,
+          'organisasi_id': state.organisasiID,
+          'user_id': session['user_id'],
+          'sales_tipe_id': state.salesTipeID,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'retur_source': ref.read(penjualanProvider).returSource,
+          'nominal_bayar': state.nominalBayar,
+          'device_token': _deviceToken,
+          'keterangan': _keteranganController.text.trim(),
+        }),
+      );
 
       if (mounted) Navigator.pop(context); // tutup loading
 
@@ -1629,7 +1773,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   Text(
                     'Kembalian: Rp ${CurrencyFormat.format(kembalian)}',
                     style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold),
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -1642,7 +1788,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     onPressed: () async {
                       final caraBayar = _caraBayarList.firstWhere(
                             (c) =>
-                                int.parse(c['dim_carabayar_id'].toString()) ==
+                                int.parse(
+                                  c['dim_carabayar_id'].toString(),
+                                ) ==
                                 state.caraBayarID,
                             orElse: () => {'nama': ''},
                           )['nama'] as String? ??
@@ -1670,7 +1818,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     onPressed: () async {
                       final caraBayar = _caraBayarList.firstWhere(
                             (c) =>
-                                int.parse(c['dim_carabayar_id'].toString()) ==
+                                int.parse(
+                                  c['dim_carabayar_id'].toString(),
+                                ) ==
                                 state.caraBayarID,
                             orElse: () => {'nama': ''},
                           )['nama'] as String? ??
@@ -1706,9 +1856,12 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     _resetTransaksi();
                   },
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1D273B)),
-                  child: const Text('Selesai',
-                      style: TextStyle(color: Colors.white)),
+                    backgroundColor: const Color(0xFF1D273B),
+                  ),
+                  child: const Text(
+                    'Selesai',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
               ],
             ),
@@ -1744,26 +1897,30 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final dio = ApiService.getDio(token: _token);
 
     dio
-        .post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'kirimWA',
-              'number': invoiceNumber,
-              'store_id': storeID,
-              'organisasi_id': organisasiID,
-              'member_id': memberID,
-            }))
+        .post(
+          '/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'kirimWA',
+            'number': invoiceNumber,
+            'store_id': storeID,
+            'organisasi_id': organisasiID,
+            'member_id': memberID,
+          }),
+        )
         .then((_) {})
         .catchError((_) {});
 
     dio
-        .post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'kirimEmail',
-              'number': invoiceNumber,
-              'store_id': storeID,
-              'organisasi_id': organisasiID,
-              'member_id': memberID,
-            }))
+        .post(
+          '/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'kirimEmail',
+            'number': invoiceNumber,
+            'store_id': storeID,
+            'organisasi_id': organisasiID,
+            'member_id': memberID,
+          }),
+        )
         .then((_) {})
         .catchError((_) {});
   }
@@ -1775,13 +1932,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final storeName = currentState.storeName;
     final organisasiID = currentState.organisasiID;
 
-    final numberRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getNumber',
-          'store_id': storeID,
-          'organisasi_id': organisasiID,
-          'device_token': _deviceToken,
-        }));
+    final numberRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getNumber',
+        'store_id': storeID,
+        'organisasi_id': organisasiID,
+        'device_token': _deviceToken,
+      }),
+    );
     final newNumber = numberRes.data['number'];
 
     ref.read(penjualanProvider.notifier).reset();
@@ -1790,8 +1949,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID:
-              int.parse(_channels.first['dim_salestipe_id'].toString()),
+          salesTipeID: int.parse(
+            _channels.first['dim_salestipe_id'].toString(),
+          ),
         );
 
     setState(() {
@@ -1810,7 +1970,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     }
     _itemNotesControllers.clear();
     _expandedNotes.clear();
-    _loadImageProducts();
+    if (_imageCategories.isEmpty) {
+      _loadImageProducts();
+    }
   }
 
   // ============================================================
@@ -1844,7 +2006,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text(
-                    'Belum ada printer terhubung. Buka pengaturan printer.'),
+                  'Belum ada printer terhubung. Buka pengaturan printer.',
+                ),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -1858,11 +2021,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final dio = ApiService.getDio(token: _token);
 
       // ── Ambil data store ─────────────────────────────────────
-      final storeRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStoreData',
-            'store_id': state.storeID,
-          }));
+      final storeRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getStoreData',
+          'store_id': state.storeID,
+        }),
+      );
 
       final storeName = storeRes.data['nama'] ?? '';
       final storeAddress = storeRes.data['alamat'] ?? '';
@@ -1880,16 +2045,18 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
       // ── Siapkan items — include keterangan per item ──────────
       final items = currentState.items
-          .map((item) => {
-                'nama': item.nama,
-                'qty': item.qty,
-                'hpj': item.hpj,
-                'subtotal': item.subtotal,
-                'diskon_persen': item.diskonPersen,
-                'diskon_nominal': item.diskonNominal,
-                'packages_notes': item.packagesNotes ?? '',
-                'keterangan': item.keterangan ?? '',
-              })
+          .map(
+            (item) => {
+              'nama': item.nama,
+              'qty': item.qty,
+              'hpj': item.hpj,
+              'subtotal': item.subtotal,
+              'diskon_persen': item.diskonPersen,
+              'diskon_nominal': item.diskonNominal,
+              'packages_notes': item.packagesNotes ?? '',
+              'keterangan': item.keterangan ?? '',
+            },
+          )
           .toList();
 
       // ── Ambil nama channel ───────────────────────────────────
@@ -1953,7 +2120,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text(
-                    'Struk customer OK, kitchen print gagal. Coba ulangi.'),
+                  'Struk customer OK, kitchen print gagal. Coba ulangi.',
+                ),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -1998,15 +2166,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-                content: Text('Print berhasil!'),
-                backgroundColor: Colors.green),
+              content: Text('Print berhasil!'),
+              backgroundColor: Colors.green,
+            ),
           );
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Gagal print: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Gagal print: $e')));
       }
     }
   }
@@ -2058,19 +2228,25 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ),
               ),
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 child: Text(
                   'Pilih Print — $invoiceNumber',
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
                 ),
               ),
               const Divider(),
               // Customer copy
               ListTile(
-                leading:
-                    const Icon(Icons.receipt_long, color: Color(0xFF1D273B)),
+                leading: const Icon(
+                  Icons.receipt_long,
+                  color: Color(0xFF1D273B),
+                ),
                 title: const Text('Customer Copy'),
                 subtitle: const Text('Struk untuk pelanggan'),
                 onTap: () {
@@ -2140,7 +2316,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text(
-                    'Belum ada printer terhubung. Buka pengaturan printer.'),
+                  'Belum ada printer terhubung. Buka pengaturan printer.',
+                ),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -2151,26 +2328,30 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
 
       final dio = ApiService.getDio(token: _token);
-      final storeRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStoreData',
-            'store_id': currentState.storeID,
-          }));
+      final storeRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getStoreData',
+          'store_id': currentState.storeID,
+        }),
+      );
       final storeName = storeRes.data['nama'] ?? '';
 
       final keteranganTrx = _keteranganController.text.trim();
 
       final items = currentState.items
-          .map((item) => {
-                'nama': item.nama,
-                'qty': item.qty,
-                'hpj': item.hpj,
-                'subtotal': item.subtotal,
-                'diskon_persen': item.diskonPersen,
-                'diskon_nominal': item.diskonNominal,
-                'packages_notes': item.packagesNotes ?? '',
-                'keterangan': item.keterangan ?? '',
-              })
+          .map(
+            (item) => {
+              'nama': item.nama,
+              'qty': item.qty,
+              'hpj': item.hpj,
+              'subtotal': item.subtotal,
+              'diskon_persen': item.diskonPersen,
+              'diskon_nominal': item.diskonNominal,
+              'packages_notes': item.packagesNotes ?? '',
+              'keterangan': item.keterangan ?? '',
+            },
+          )
           .toList();
 
       final kasirNama =
@@ -2202,8 +2383,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Gagal print kitchen: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Gagal print kitchen: $e')));
       }
     }
   }
@@ -2215,8 +2397,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
 
     if (state.items.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Belum ada produk')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Belum ada produk')));
       return;
     }
 
@@ -2238,8 +2421,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Batal')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -2266,28 +2450,32 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final session = await SessionService.getSession();
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'simpanPending',
-          'number': state.number,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'user_id': session['user_id'],
-          'label': label ?? '',
-          'device_token': _deviceToken,
-          'salestipe_id': state.salesTipeID,
-          'keterangan': _keteranganController.text.trim(),
-          if (pendingOrderID != null) 'pending_order_id': pendingOrderID,
-        }));
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'simpanPending',
+        'number': state.number,
+        'store_id': state.storeID,
+        'organisasi_id': state.organisasiID,
+        'member_id': state.memberID ?? 0,
+        'user_id': session['user_id'],
+        'label': label ?? '',
+        'device_token': _deviceToken,
+        'salestipe_id': state.salesTipeID,
+        'keterangan': _keteranganController.text.trim(),
+        if (pendingOrderID != null) 'pending_order_id': pendingOrderID,
+      }),
+    );
 
     if (res.data['success'] == true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(pendingOrderID != null
-                ? 'Pending order diperbarui'
-                : 'Order disimpan sebagai pending'),
+            content: Text(
+              pendingOrderID != null
+                  ? 'Pending order diperbarui'
+                  : 'Order disimpan sebagai pending',
+            ),
             backgroundColor: Colors.orange,
           ),
         );
@@ -2298,7 +2486,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(res.data['message'] ?? 'Gagal simpan pending')),
+            content: Text(res.data['message'] ?? 'Gagal simpan pending'),
+          ),
         );
       }
     }
@@ -2311,11 +2500,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getPendingOrders',
-          'store_id': state.storeID,
-        }));
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getPendingOrders',
+        'store_id': state.storeID,
+      }),
+    );
 
     final orders = List<Map<String, dynamic>>.from(res.data['data']);
     if (orders.isEmpty) {
@@ -2339,11 +2530,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               padding: const EdgeInsets.all(16),
               color: const Color(0xFF1D273B),
               width: double.infinity,
-              child: const Text('Pending Orders',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16)),
+              child: const Text(
+                'Pending Orders',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
             ),
             Expanded(
               child: ListView.builder(
@@ -2351,11 +2545,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 itemBuilder: (_, i) {
                   final order = orders[i];
                   return Card(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     child: ListTile(
-                      leading: const Icon(Icons.receipt_long,
-                          color: Color(0xFF1D273B)),
+                      leading: const Icon(
+                        Icons.receipt_long,
+                        color: Color(0xFF1D273B),
+                      ),
                       title: Text(
                         order['label']?.isNotEmpty == true
                             ? order['label']
@@ -2363,22 +2561,27 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: Text(
-                          '${(order['member'] as String?)?.isNotEmpty == true ? order['member'] : 'Tanpa Member'} • ${order['created_date'].toString().substring(0, 16)}'),
+                        '${(order['member'] as String?)?.isNotEmpty == true ? order['member'] : 'Tanpa Member'} • ${order['created_date'].toString().substring(0, 16)}',
+                      ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           // Print pending
                           IconButton(
-                            icon: const Icon(Icons.print_outlined,
-                                color: Colors.blueGrey),
+                            icon: const Icon(
+                              Icons.print_outlined,
+                              color: Colors.blueGrey,
+                            ),
                             tooltip: 'Print Struk Pending',
                             onPressed: () async {
                               await _printPendingOrder(order);
                             },
                           ),
                           IconButton(
-                            icon: const Icon(Icons.play_circle,
-                                color: Colors.green),
+                            icon: const Icon(
+                              Icons.play_circle,
+                              color: Colors.green,
+                            ),
                             onPressed: () async {
                               Navigator.pop(context);
                               await _retrievePending(
@@ -2395,27 +2598,32 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                                 builder: (_) => AlertDialog(
                                   title: const Text('Hapus Order?'),
                                   content: Text(
-                                      'Order ${order['label'] ?? order['kode']} akan dihapus.'),
+                                    'Order ${order['label'] ?? order['kode']} akan dihapus.',
+                                  ),
                                   actions: [
                                     TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(context, false),
-                                        child: const Text('Batal')),
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Batal'),
+                                    ),
                                     ElevatedButton(
                                       onPressed: () =>
                                           Navigator.pop(context, true),
                                       style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.red),
-                                      child: const Text('Hapus',
-                                          style:
-                                              TextStyle(color: Colors.white)),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                      child: const Text(
+                                        'Hapus',
+                                        style: TextStyle(color: Colors.white),
+                                      ),
                                     ),
                                   ],
                                 ),
                               );
                               if (del == true) {
                                 await _deletePending(
-                                    int.parse(order['id'].toString()));
+                                  int.parse(order['id'].toString()),
+                                );
                                 if (mounted) Navigator.pop(context);
                                 await _showRetrieveDialog();
                               }
@@ -2438,33 +2646,43 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'retrievePending',
-          'sales_order_id': salesOrderID,
-          'number': state.number,
-          'device_token': _deviceToken,
-        }));
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'retrievePending',
+        'sales_order_id': salesOrderID,
+        'number': state.number,
+        'device_token': _deviceToken,
+      }),
+    );
 
     if (res.data['success'] == true) {
-      // Restore nomor asli pending ke state — satu transaksi satu nomor dari awal sampai selesai
       final restoredNumber = res.data['number'] as String? ?? state.number;
+
+      // Resolve salestipe dulu sebelum setInitialData
+      final salestipeID = res.data['salestipe_id'];
+      final resolvedSalesTipeID =
+          (salestipeID != null && int.parse(salestipeID.toString()) > 0)
+              ? int.parse(salestipeID.toString())
+              : state.salesTipeID;
+
+      // Set semua data awal sekaligus — number, store, DAN salestipe dalam satu call
+      // agar tidak ada state yang ter-reset atau ter-timpa oleh call berikutnya
       ref.read(penjualanProvider.notifier).setInitialData(
             number: restoredNumber,
             storeID: state.storeID,
             storeName: state.storeName,
             organisasiID: state.organisasiID,
-            salesTipeID: state.salesTipeID,
+            salesTipeID: resolvedSalesTipeID,
           );
 
       // Set member
       final memberID = res.data['member_id'];
       if (memberID != null && int.parse(memberID.toString()) > 0) {
         _memberController.text = res.data['member'] ?? '';
-        ref.read(penjualanProvider.notifier).setMember(
-              int.parse(memberID.toString()),
-              member,
-            );
+        ref
+            .read(penjualanProvider.notifier)
+            .setMember(int.parse(memberID.toString()), member);
       } else {
         _memberController.clear();
         ref.read(penjualanProvider.notifier).setMember(null, '');
@@ -2474,16 +2692,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       final keterangan = res.data['keterangan'] as String? ?? '';
       _keteranganController.text = keterangan;
 
-      // Restore salestipe / channel
-      final salestipeID = res.data['salestipe_id'];
-      if (salestipeID != null) {
-        final stipeID = int.parse(salestipeID.toString());
-        if (stipeID > 0) {
-          ref.read(penjualanProvider.notifier).setSalesTipe(stipeID);
-          // Reload grid image agar harga sesuai channel order ini
-          _loadImageProducts();
-        }
-      }
+      // Reload grid image jika salestipe berubah
+      _loadImageProducts();
 
       // Simpan ID pending order yang sedang aktif agar bisa di-update (bukan insert baru)
       setState(() {
@@ -2505,11 +2715,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
   Future<void> _deletePending(int salesOrderID) async {
     final dio = ApiService.getDio(token: _token);
-    await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'deletePending',
-          'sales_order_id': salesOrderID,
-        }));
+    await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'deletePending',
+        'sales_order_id': salesOrderID,
+      }),
+    );
   }
 
   // ============================================================
@@ -2554,18 +2766,24 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ),
               ),
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 child: Text(
                   'Print Pending — $invoiceLabel',
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
                 ),
               ),
               const Divider(),
               ListTile(
-                leading:
-                    const Icon(Icons.receipt_long, color: Color(0xFF1D273B)),
+                leading: const Icon(
+                  Icons.receipt_long,
+                  color: Color(0xFF1D273B),
+                ),
                 title: const Text('Customer Copy'),
                 subtitle: const Text('Struk estimasi untuk pelanggan'),
                 onTap: () {
@@ -2601,7 +2819,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
   // ── Helper: ambil data store + items pending ──────────────────
   Future<Map<String, dynamic>?> _fetchPendingPrintData(
-      Map<String, dynamic> order) async {
+    Map<String, dynamic> order,
+  ) async {
     // Pastikan printer terhubung
     final connected = await PrinterHelper.isConnected();
     if (!connected) {
@@ -2611,8 +2830,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content:
-                  Text('Belum ada printer terhubung. Buka pengaturan printer.'),
+              content: Text(
+                'Belum ada printer terhubung. Buka pengaturan printer.',
+              ),
               backgroundColor: Colors.orange,
             ),
           );
@@ -2626,28 +2846,33 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final itemsRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getPendingOrderItems',
-          'sales_order_id': salesOrderID,
-        }));
+    final itemsRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getPendingOrderItems',
+        'sales_order_id': salesOrderID,
+      }),
+    );
 
     if (itemsRes.data['success'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-              content: Text('Gagal ambil data item'),
-              backgroundColor: Colors.red),
+            content: Text('Gagal ambil data item'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
       return null;
     }
 
-    final storeRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getStoreData',
-          'store_id': state.storeID,
-        }));
+    final storeRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getStoreData',
+        'store_id': state.storeID,
+      }),
+    );
 
     // Gunakan salestipe_nama & keterangan dari header order (bukan dari state aktif)
     final salesTipeNama = (itemsRes.data['salestipe_nama'] as String? ?? '')
@@ -2668,7 +2893,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     // Tanggal dari tr_sales_order.tanggal (date saat order dibuat)
     final tanggalRaw = itemsRes.data['tanggal']?.toString() ?? '';
     final tanggal = tanggalRaw.isNotEmpty
-        ? tanggalRaw.substring(0, tanggalRaw.length >= 10 ? 10 : tanggalRaw.length)
+        ? tanggalRaw.substring(
+            0,
+            tanggalRaw.length >= 10 ? 10 : tanggalRaw.length,
+          )
         : DateTime.now().toString().substring(0, 10); // fallback
     // Jam transaksi dari created_date order pending (format: "2024-01-15 14:30:00" → "14:30")
     final createdDateRaw = itemsRes.data['created_date']?.toString() ?? '';
@@ -2727,9 +2955,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         logoFileName:
             (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
         logoUrl: (d['logoUrl'] as String).isNotEmpty ? d['logoUrl'] : null,
-        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
-            ? d['jamTransaksi']
-            : null,
+        jamTransaksi:
+            (d['jamTransaksi'] as String).isNotEmpty ? d['jamTransaksi'] : null,
       );
 
       if (mounted) {
@@ -2742,8 +2969,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Gagal print: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Gagal print: $e')));
       }
     }
   }
@@ -2767,9 +2995,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             : null,
         keterangan:
             (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
-        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
-            ? d['jamTransaksi']
-            : null,
+        jamTransaksi:
+            (d['jamTransaksi'] as String).isNotEmpty ? d['jamTransaksi'] : null,
       );
 
       if (mounted) {
@@ -2782,8 +3009,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Gagal print kitchen: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Gagal print kitchen: $e')));
       }
     }
   }
@@ -2815,9 +3043,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         logoFileName:
             (d['logoFileName'] as String).isNotEmpty ? d['logoFileName'] : null,
         logoUrl: (d['logoUrl'] as String).isNotEmpty ? d['logoUrl'] : null,
-        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
-            ? d['jamTransaksi']
-            : null,
+        jamTransaksi:
+            (d['jamTransaksi'] as String).isNotEmpty ? d['jamTransaksi'] : null,
       );
 
       await Future.delayed(const Duration(milliseconds: 500));
@@ -2836,9 +3063,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             : null,
         keterangan:
             (d['keterangan'] as String).isNotEmpty ? d['keterangan'] : null,
-        jamTransaksi: (d['jamTransaksi'] as String).isNotEmpty
-            ? d['jamTransaksi']
-            : null,
+        jamTransaksi:
+            (d['jamTransaksi'] as String).isNotEmpty ? d['jamTransaksi'] : null,
       );
 
       if (mounted) {
@@ -2851,8 +3077,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Gagal print: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Gagal print: $e')));
       }
     }
   }
@@ -2897,17 +3124,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   }
 
   /// Padding umum untuk container (header, summary)
-  EdgeInsets get _panelPadding => EdgeInsets.all(_isTinyTablet
-      ? 6
-      : _isSmallTablet
-          ? 8
-          : 12);
+  EdgeInsets get _panelPadding => EdgeInsets.all(
+        _isTinyTablet
+            ? 6
+            : _isSmallTablet
+                ? 8
+                : 12,
+      );
 
   /// Padding ringkas untuk mode compact
-  EdgeInsets get _compactPadding => const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 4,
-      );
+  EdgeInsets get _compactPadding =>
+      const EdgeInsets.symmetric(horizontal: 8, vertical: 4);
 
   /// Font size label utama (Total, store name, dsb.)
   double get _labelFontSize => _isTinyTablet
@@ -2939,9 +3166,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final state = ref.watch(penjualanProvider);
@@ -2951,8 +3176,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1D273B),
-        title: const Text('POS Aibipi',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'POS Aibipi',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
@@ -3006,8 +3233,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () =>
-                        setState(() => _waBannerDismissed = true),
+                    onPressed: () => setState(() => _waBannerDismissed = true),
                     child: const Text(
                       'Tutup',
                       style: TextStyle(color: Color(0xFF856404)),
@@ -3053,20 +3279,28 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Store',
-                        style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    Text(state.storeName,
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Store',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    Text(
+                      state.storeName,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ],
                 ),
               ),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const Text('No. Invoice',
-                      style: TextStyle(fontSize: 11, color: Colors.grey)),
-                  Text(state.number,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const Text(
+                    'No. Invoice',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  Text(
+                    state.number,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ],
               ),
             ],
@@ -3098,15 +3332,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               if (state.items.isNotEmpty) {
                 try {
                   final dio = ApiService.getDio(token: _token);
-                  await dio.post('/penjualan.php',
-                      data: FormData.fromMap({
-                        'action': 'recalculateChannel',
-                        'number': state.number,
-                        'salestipe_id': val,
-                        'store_id': state.storeID,
-                        'organisasi_id': state.organisasiID,
-                        'device_token': _deviceToken,
-                      }));
+                  await dio.post(
+                    '/penjualan.php',
+                    data: FormData.fromMap({
+                      'action': 'recalculateChannel',
+                      'number': state.number,
+                      'salestipe_id': val,
+                      'store_id': state.storeID,
+                      'organisasi_id': state.organisasiID,
+                      'device_token': _deviceToken,
+                    }),
+                  );
                   await _refreshFromApi();
                 } catch (_) {}
               }
@@ -3126,14 +3362,19 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   decoration: InputDecoration(
                     labelText: 'Member (opsional)',
                     border: const OutlineInputBorder(),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     isDense: true,
                     // ── Ikon di kiri: add member / clear ──────────
                     prefixIcon: state.memberID != null
                         ? IconButton(
-                            icon: const Icon(Icons.close,
-                                size: 18, color: Colors.red),
+                            icon: const Icon(
+                              Icons.close,
+                              size: 18,
+                              color: Colors.red,
+                            ),
                             tooltip: 'Hapus member',
                             onPressed: () {
                               _memberController.clear();
@@ -3143,8 +3384,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                             },
                           )
                         : IconButton(
-                            icon: const Icon(Icons.person_add,
-                                size: 18, color: Color(0xFF1D273B)),
+                            icon: const Icon(
+                              Icons.person_add,
+                              size: 18,
+                              color: Color(0xFF1D273B),
+                            ),
                             tooltip: 'Tambah member baru',
                             onPressed: _showAddMemberSheet,
                           ),
@@ -3154,19 +3398,23 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   onSubmitted: (val) async {
                     if (val.isEmpty) return;
                     final dio = ApiService.getDio(token: _token);
-                    final res = await dio.post('/penjualan.php',
-                        data: FormData.fromMap({
-                          'action': 'searchMember',
-                          'term': val,
-                          'organisasi_id': state.organisasiID,
-                        }));
-                    final data =
-                        List<Map<String, dynamic>>.from(res.data['data']);
+                    final res = await dio.post(
+                      '/penjualan.php',
+                      data: FormData.fromMap({
+                        'action': 'searchMember',
+                        'term': val,
+                        'organisasi_id': state.organisasiID,
+                      }),
+                    );
+                    final data = List<Map<String, dynamic>>.from(
+                      res.data['data'],
+                    );
                     if (data.isEmpty) {
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                              content: Text('Member tidak ditemukan')),
+                            content: Text('Member tidak ditemukan'),
+                          ),
                         );
                       }
                       return;
@@ -3205,12 +3453,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 children: [
                   OutlinedButton.icon(
                     onPressed: _showVoucherDialog,
-                    icon: const Icon(Icons.confirmation_number_outlined,
-                        size: 18),
+                    icon: const Icon(
+                      Icons.confirmation_number_outlined,
+                      size: 18,
+                    ),
                     label: const Text('Voucher'),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 12),
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
                       foregroundColor:
                           _activeVoucher.isNotEmpty ? Colors.indigo : null,
                       side: _activeVoucher.isNotEmpty
@@ -3241,8 +3493,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.red,
                   side: const BorderSide(color: Colors.red),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                 ),
               ),
             ],
@@ -3270,8 +3524,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             decoration: InputDecoration(
               labelText: 'Cari produk (nama / SKU)',
               border: const OutlineInputBorder(),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 8,
+              ),
               isDense: true,
               suffixIcon: IconButton(
                 icon: const Icon(Icons.search),
@@ -3312,14 +3568,21 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(state.storeName,
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: _labelFontSize),
-                            overflow: TextOverflow.ellipsis),
-                        Text(state.number,
-                            style: TextStyle(
-                                fontSize: _smallFontSize, color: Colors.grey)),
+                        Text(
+                          state.storeName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: _labelFontSize,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          state.number,
+                          style: TextStyle(
+                            fontSize: _smallFontSize,
+                            color: Colors.grey,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -3333,12 +3596,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   initialValue: state.salesTipeID,
                   decoration: inputDeco.copyWith(labelText: 'Channel'),
                   style: TextStyle(
-                      fontSize: _labelFontSize, color: Colors.black87),
+                    fontSize: _labelFontSize,
+                    color: Colors.black87,
+                  ),
                   items: _channels.map((c) {
                     return DropdownMenuItem<int>(
                       value: int.parse(c['dim_salestipe_id'].toString()),
-                      child: Text(c['nama'],
-                          style: TextStyle(fontSize: _labelFontSize)),
+                      child: Text(
+                        c['nama'],
+                        style: TextStyle(fontSize: _labelFontSize),
+                      ),
                     );
                   }).toList(),
                   onChanged: (val) async {
@@ -3349,15 +3616,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     if (state.items.isNotEmpty) {
                       try {
                         final dio = ApiService.getDio(token: _token);
-                        await dio.post('/penjualan.php',
-                            data: FormData.fromMap({
-                              'action': 'recalculateChannel',
-                              'number': state.number,
-                              'salestipe_id': val,
-                              'store_id': state.storeID,
-                              'organisasi_id': state.organisasiID,
-                              'device_token': _deviceToken,
-                            }));
+                        await dio.post(
+                          '/penjualan.php',
+                          data: FormData.fromMap({
+                            'action': 'recalculateChannel',
+                            'number': state.number,
+                            'salestipe_id': val,
+                            'store_id': state.storeID,
+                            'organisasi_id': state.organisasiID,
+                            'device_token': _deviceToken,
+                          }),
+                        );
                         await _refreshFromApi();
                       } catch (_) {}
                     }
@@ -3380,8 +3649,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     labelText: 'Member',
                     prefixIcon: state.memberID != null
                         ? IconButton(
-                            icon: const Icon(Icons.close,
-                                size: 16, color: Colors.red),
+                            icon: const Icon(
+                              Icons.close,
+                              size: 16,
+                              color: Colors.red,
+                            ),
                             tooltip: 'Hapus member',
                             onPressed: () {
                               _memberController.clear();
@@ -3391,8 +3663,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                             },
                           )
                         : IconButton(
-                            icon: const Icon(Icons.person_add,
-                                size: 16, color: Color(0xFF1D273B)),
+                            icon: const Icon(
+                              Icons.person_add,
+                              size: 16,
+                              color: Color(0xFF1D273B),
+                            ),
                             tooltip: 'Tambah member baru',
                             onPressed: _showAddMemberSheet,
                           ),
@@ -3401,19 +3676,23 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                   onSubmitted: (val) async {
                     if (val.isEmpty) return;
                     final dio = ApiService.getDio(token: _token);
-                    final res = await dio.post('/penjualan.php',
-                        data: FormData.fromMap({
-                          'action': 'searchMember',
-                          'term': val,
-                          'organisasi_id': state.organisasiID,
-                        }));
-                    final data =
-                        List<Map<String, dynamic>>.from(res.data['data']);
+                    final res = await dio.post(
+                      '/penjualan.php',
+                      data: FormData.fromMap({
+                        'action': 'searchMember',
+                        'term': val,
+                        'organisasi_id': state.organisasiID,
+                      }),
+                    );
+                    final data = List<Map<String, dynamic>>.from(
+                      res.data['data'],
+                    );
                     if (data.isEmpty) {
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                              content: Text('Member tidak ditemukan')),
+                            content: Text('Member tidak ditemukan'),
+                          ),
                         );
                       }
                       return;
@@ -3462,17 +3741,23 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                           tooltip: 'Voucher',
                           onPressed: _showVoucherDialog,
                           padding: EdgeInsets.zero,
-                          constraints:
-                              const BoxConstraints(minWidth: 36, minHeight: 36),
+                          constraints: const BoxConstraints(
+                            minWidth: 36,
+                            minHeight: 36,
+                          ),
                         )
                       : OutlinedButton.icon(
                           onPressed: _showVoucherDialog,
-                          icon: const Icon(Icons.confirmation_number_outlined,
-                              size: 16),
+                          icon: const Icon(
+                            Icons.confirmation_number_outlined,
+                            size: 16,
+                          ),
                           label: const Text('Voucher'),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 8),
+                              horizontal: 8,
+                              vertical: 8,
+                            ),
                             foregroundColor: _activeVoucher.isNotEmpty
                                 ? Colors.indigo
                                 : null,
@@ -3501,24 +3786,33 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               // Retur — icon only jika tiny
               _isTinyTablet
                   ? IconButton(
-                      icon: const Icon(Icons.assignment_return_outlined,
-                          size: 22, color: Colors.red),
+                      icon: const Icon(
+                        Icons.assignment_return_outlined,
+                        size: 22,
+                        color: Colors.red,
+                      ),
                       tooltip: 'Retur',
                       onPressed: _showReturDialog,
                       padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints(minWidth: 36, minHeight: 36),
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
                     )
                   : OutlinedButton.icon(
                       onPressed: _showReturDialog,
-                      icon: const Icon(Icons.assignment_return_outlined,
-                          size: 16),
+                      icon: const Icon(
+                        Icons.assignment_return_outlined,
+                        size: 16,
+                      ),
                       label: const Text('Retur'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                         side: const BorderSide(color: Colors.red),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 8),
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
                         textStyle: TextStyle(fontSize: _smallFontSize),
                       ),
                     ),
@@ -3576,11 +3870,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.image_not_supported_outlined,
-                size: 48, color: Colors.grey.shade400),
+            Icon(
+              Icons.image_not_supported_outlined,
+              size: 48,
+              color: Colors.grey.shade400,
+            ),
             const SizedBox(height: 8),
-            Text('Tidak ada produk dengan gambar',
-                style: TextStyle(color: Colors.grey.shade500)),
+            Text(
+              'Tidak ada produk dengan gambar',
+              style: TextStyle(color: Colors.grey.shade500),
+            ),
           ],
         ),
       );
@@ -3644,61 +3943,89 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         final kode = p['kode']?.toString() ?? '';
         final hpj = (p['hpj'] as num? ?? 0).toDouble();
 
+        final isProcessing = _processingKodes.contains(kode);
+
         return GestureDetector(
-          onTap: () => _insertProduk(kode),
-          child: Card(
-            elevation: 2,
-            clipBehavior: Clip.antiAlias,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: Image.network(
-                    imageUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: Colors.grey.shade200,
-                      child: const Icon(Icons.broken_image,
-                          color: Colors.grey, size: 32),
-                    ),
-                    loadingBuilder: (_, child, progress) {
-                      if (progress == null) return child;
-                      return Container(
-                        color: Colors.grey.shade100,
-                        child: const Center(
-                            child: CircularProgressIndicator(strokeWidth: 2)),
-                      );
-                    },
-                  ),
-                ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-                  color: Colors.white,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          onTap: isProcessing ? null : () => _insertProduk(kode),
+          child: Opacity(
+            opacity: isProcessing ? 0.55 : 1.0,
+            child: Card(
+              elevation: 2,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Stack(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        nama,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 11, fontWeight: FontWeight.w600),
+                      Expanded(
+                        child: CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          fit: BoxFit.cover,
+                          // fadeIn agar transisi halus saat pertama load
+                          fadeInDuration: const Duration(milliseconds: 200),
+                          placeholder: (_, __) => Container(
+                            color: Colors.grey.shade100,
+                            child: const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                          errorWidget: (_, __, ___) => Container(
+                            color: Colors.grey.shade200,
+                            child: const Icon(
+                              Icons.broken_image,
+                              color: Colors.grey,
+                              size: 32,
+                            ),
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Rp ${CurrencyFormat.format(hpj)}',
-                        style: const TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF1D273B),
-                            fontWeight: FontWeight.bold),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 5,
+                        ),
+                        color: Colors.white,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              nama,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Rp ${CurrencyFormat.format(hpj)}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF1D273B),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                  // Spinner overlay saat sedang diproses
+                  if (isProcessing)
+                    const Positioned.fill(
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Color(0xFF1D273B),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -3716,8 +4043,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         children: const [
           SizedBox(height: 80),
           Center(
-            child:
-                Text('Belum ada produk', style: TextStyle(color: Colors.grey)),
+            child: Text(
+              'Belum ada produk',
+              style: TextStyle(color: Colors.grey),
+            ),
           ),
         ],
       );
@@ -3757,32 +4086,48 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                           Row(
                             children: [
                               Expanded(
-                                child: Text(item.nama,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold)),
+                                child: Text(
+                                  item.nama,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
                               if (isPackage)
                                 Container(
                                   margin: const EdgeInsets.only(left: 4),
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: Colors.blue.shade50,
                                     borderRadius: BorderRadius.circular(4),
-                                    border:
-                                        Border.all(color: Colors.blue.shade200),
+                                    border: Border.all(
+                                      color: Colors.blue.shade200,
+                                    ),
                                   ),
-                                  child: const Text('Package',
-                                      style: TextStyle(
-                                          fontSize: 10, color: Colors.blue)),
+                                  child: const Text(
+                                    'Package',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.blue,
+                                    ),
+                                  ),
                                 ),
                             ],
                           ),
-                          Text(item.kode,
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.grey)),
-                          Text('Rp ${CurrencyFormat.format(item.hpj)}',
-                              style: const TextStyle(fontSize: 12)),
+                          Text(
+                            item.kode,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          Text(
+                            'Rp ${CurrencyFormat.format(item.hpj)}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
                         ],
                       ),
                     ),
@@ -3793,9 +4138,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                           icon: const Icon(Icons.remove_circle_outline),
                           onPressed: () => _updateQty(i, item.qty - 1),
                         ),
-                        Text('${item.qty}',
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(
+                          '${item.qty}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         IconButton(
                           icon: const Icon(Icons.add_circle_outline),
                           onPressed: () => _updateQty(i, item.qty + 1),
@@ -3806,9 +4152,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text('Rp ${CurrencyFormat.format(item.subtotal)}',
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(
+                          'Rp ${CurrencyFormat.format(item.subtotal)}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -3835,8 +4182,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                               },
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete,
-                                  color: Colors.red, size: 20),
+                              icon: const Icon(
+                                Icons.delete,
+                                color: Colors.red,
+                                size: 20,
+                              ),
                               onPressed: () => _removeItem(i),
                             ),
                           ],
@@ -3856,11 +4206,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                         hintText: 'Catatan untuk item ini...',
                         border: const OutlineInputBorder(),
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
                         isDense: true,
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.check,
-                              size: 18, color: Color(0xFF1D273B)),
+                          icon: const Icon(
+                            Icons.check,
+                            size: 18,
+                            color: Color(0xFF1D273B),
+                          ),
                           onPressed: () async {
                             final ket = notesCtrl.text.trim();
                             await _updateItemKeterangan(i, ket);
@@ -3882,16 +4237,20 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     padding: const EdgeInsets.only(top: 2, left: 2),
                     child: Row(
                       children: [
-                        Icon(Icons.notes,
-                            size: 13, color: Colors.amber.shade700),
+                        Icon(
+                          Icons.notes,
+                          size: 13,
+                          color: Colors.amber.shade700,
+                        ),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
                             item.keterangan ?? '',
                             style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.amber.shade800,
-                                fontStyle: FontStyle.italic),
+                              fontSize: 11,
+                              color: Colors.amber.shade800,
+                              fontStyle: FontStyle.italic,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -3929,9 +4288,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         return Column(
           children: [
             _buildHeader(state),
-            Expanded(
-              child: _buildImageGrid(),
-            ),
+            Expanded(child: _buildImageGrid()),
             Container(height: 1, color: Colors.grey.shade300),
             SizedBox(
               height: bottomPanelHeight,
@@ -3983,9 +4340,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
               child: Column(
                 children: [
                   _buildHeader(state),
-                  Expanded(
-                    child: _buildImageGrid(),
-                  ),
+                  Expanded(child: _buildImageGrid()),
                 ],
               ),
             ),
@@ -4037,9 +4392,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     }
 
     return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: availableHeight * maxFraction,
-      ),
+      constraints: BoxConstraints(maxHeight: availableHeight * maxFraction),
       child: SingleChildScrollView(
         padding: EdgeInsets.only(bottom: keyboardHeight),
         child: _buildSummary(state),
@@ -4056,8 +4409,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
     final compact = _isCompactHeader; // reuse flag
     final inputDeco = InputDecoration(
       border: const OutlineInputBorder(),
-      contentPadding:
-          EdgeInsets.symmetric(horizontal: 10, vertical: compact ? 6 : 8),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: compact ? 6 : 8,
+      ),
       isDense: true,
     );
 
@@ -4068,56 +4423,106 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // ── Total baris (selalu terlihat) ──
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('TOTAL',
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'TOTAL',
                 style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
-            Text('Rp ${CurrencyFormat.format(state.total)}',
+                  fontWeight: FontWeight.bold,
+                  fontSize: _labelFontSize,
+                ),
+              ),
+              Text(
+                'Rp ${CurrencyFormat.format(state.total)}',
                 style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: _labelFontSize)),
-          ]),
+                  fontWeight: FontWeight.bold,
+                  fontSize: _labelFontSize,
+                ),
+              ),
+            ],
+          ),
 
           // ── Detail baris — sembunyikan di compact ──
           if (!compact) ...[
             const Divider(height: 12),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Gross'),
-              Text('Rp ${CurrencyFormat.format(state.gross)}'),
-            ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Gross'),
+                Text('Rp ${CurrencyFormat.format(state.gross)}'),
+              ],
+            ),
             const SizedBox(height: 3),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('Diskon'),
-              Text('Rp ${CurrencyFormat.format(state.diskon)}'),
-            ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Diskon'),
+                Text('Rp ${CurrencyFormat.format(state.diskon)}'),
+              ],
+            ),
             const Divider(height: 12),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('DPP',
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
-              Text('Rp ${CurrencyFormat.format(state.dpp)}',
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
-            ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'DPP',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: _smallFontSize,
+                  ),
+                ),
+                Text(
+                  'Rp ${CurrencyFormat.format(state.dpp)}',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: _smallFontSize,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 3),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Pajak',
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
-              Text('Rp ${CurrencyFormat.format(state.pajak)}',
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: _smallFontSize)),
-            ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Pajak',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: _smallFontSize,
+                  ),
+                ),
+                Text(
+                  'Rp ${CurrencyFormat.format(state.pajak)}',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: _smallFontSize,
+                  ),
+                ),
+              ],
+            ),
           ] else ...[
             // Di compact: tampilkan DPP+Pajak ringkas 1 baris
             if (state.pajak > 0)
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('Pajak',
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Pajak',
                     style: TextStyle(
-                        color: Colors.grey, fontSize: _smallFontSize)),
-                Text('Rp ${CurrencyFormat.format(state.pajak)}',
+                      color: Colors.grey,
+                      fontSize: _smallFontSize,
+                    ),
+                  ),
+                  Text(
+                    'Rp ${CurrencyFormat.format(state.pajak)}',
                     style: TextStyle(
-                        color: Colors.grey, fontSize: _smallFontSize)),
-              ]),
+                      color: Colors.grey,
+                      fontSize: _smallFontSize,
+                    ),
+                  ),
+                ],
+              ),
           ],
 
           SizedBox(height: compact ? 6 : 8),
@@ -4130,8 +4535,10 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
             items: _caraBayarList.map((c) {
               return DropdownMenuItem<int>(
                 value: int.parse(c['dim_carabayar_id'].toString()),
-                child:
-                    Text(c['nama'], style: TextStyle(fontSize: _labelFontSize)),
+                child: Text(
+                  c['nama'],
+                  style: TextStyle(fontSize: _labelFontSize),
+                ),
               );
             }).toList(),
             onChanged: (val) {
@@ -4195,15 +4602,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6)),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
                         padding: EdgeInsets.zero,
                       ),
                       child: Text(
                         'PENDING',
                         style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: _labelFontSize),
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: _labelFontSize,
+                        ),
                       ),
                     ),
                   ),
@@ -4217,15 +4626,17 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF1D273B),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6)),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
                         padding: EdgeInsets.zero,
                       ),
                       child: Text(
                         'BAYAR',
                         style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: _labelFontSize),
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: _labelFontSize,
+                        ),
                       ),
                     ),
                   ),
@@ -4244,12 +4655,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     child: Text(
                       'PENDING PAYMENT',
                       style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold),
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -4262,14 +4676,16 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1D273B),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     child: Text(
                       'BAYAR',
                       style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: _labelFontSize),
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: _labelFontSize,
+                      ),
                     ),
                   ),
                 ),
@@ -4321,14 +4737,17 @@ class _BukaShiftButtonState extends State<_BukaShiftButton> {
               height: 20,
               width: 20,
               child: CircularProgressIndicator(
-                  color: Colors.white, strokeWidth: 2),
+                color: Colors.white,
+                strokeWidth: 2,
+              ),
             )
           : const Text(
               'Buka Shift',
               style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15),
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
             ),
     );
   }
