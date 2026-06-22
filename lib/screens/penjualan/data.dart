@@ -1,0 +1,421 @@
+// AUTO-SPLIT FROM penjualan_screen.dart — bagian: Loading data awal, ensure shift, load POS data, logout.
+// Berisi method/widget yang dipindah ke extension agar file utama lebih ringkas.
+// Behavior identik dengan versi monolitik sebelumnya.
+part of 'penjualan_screen.dart';
+
+extension PenjualanDataX on _PenjualanScreenState {
+  Future<void> _loadMinimalData() async {
+    try {
+      final session = await SessionService.getSession();
+      _token = session['token'];
+      _userID = session['user_id'];
+      _deviceToken = await SessionService.getDeviceToken();
+
+      final dio = ApiService.getDio(token: _token);
+
+      // Cek apakah user sudah punya shift aktif
+      final shiftUserRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
+      );
+
+      int storeID = 0;
+      int organisasiID = 0;
+      String storeName = '';
+
+      if (shiftUserRes.data['has_shift'] == true) {
+        // User sudah punya shift → ambil data store dari shift
+        storeID = shiftUserRes.data['store_id'];
+        organisasiID = shiftUserRes.data['organisasi_id'];
+        storeName = shiftUserRes.data['store_nama'];
+        _shiftID = shiftUserRes.data['shift_id'];
+        _isFnb = (shiftUserRes.data['is_fnb'] as int? ?? 0) == 1;
+
+        _activeStoreID = storeID;
+        _activeOrgID = organisasiID;
+        _activeStoreName = storeName;
+
+        // Langsung load data POS — tidak perlu cek shift lagi
+        await _loadPosData(
+          dio: dio,
+          storeID: storeID,
+          organisasiID: organisasiID,
+          storeName: storeName,
+        );
+      } else {
+        // Belum punya shift → pilih store dulu, lalu shift check
+        final storeRes = await dio.post(
+          '/penjualan.php',
+          data: FormData.fromMap({'action': 'getStores', 'user_id': _userID}),
+        );
+        final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
+
+        Map<String, dynamic>? pickedStore;
+        if (stores.length == 1) {
+          pickedStore = stores.first;
+        } else {
+          if (!mounted) return;
+          pickedStore = await _showStorePicker(stores);
+          if (pickedStore == null) {
+            // User cancel store picker → kembali ke HomeScreen
+            _goToHome();
+            return;
+          }
+        }
+
+        storeID = int.parse(pickedStore['id'].toString());
+        storeName = pickedStore['nama'].toString();
+
+        final orgRes = await dio.post(
+          '/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getOrganisasiID',
+            'store_id': storeID,
+          }),
+        );
+        organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
+        _isFnb = (orgRes.data['is_fnb'] as int? ?? 0) == 1;
+
+        _activeStoreID = storeID;
+        _activeOrgID = organisasiID;
+        _activeStoreName = storeName;
+
+        // Phase 2 — shift check + buka shift jika perlu
+        if (!mounted) return;
+        await _checkAndEnsureShift(
+          dio: dio,
+          storeID: storeID,
+          organisasiID: organisasiID,
+          storeName: storeName,
+        );
+      }
+    } catch (e) {
+      if (mounted) _setState(() => _isLoading = false);
+    }
+  }
+
+  // ============================================================
+  // PHASE 2 — Cek shift, buka jika belum ada
+  // ============================================================
+  Future<void> _checkAndEnsureShift({
+    required Dio dio,
+    required int storeID,
+    required int organisasiID,
+    required String storeName,
+  }) async {
+    final shiftRes = await ShiftService.cekShift(
+      token: _token,
+      storeID: storeID,
+      organisasiID: organisasiID,
+      userID: _userID,
+    );
+
+    if (shiftRes.status == ShiftStatus.milikOrangLain) {
+      // Store sedang dipakai orang lain → notif → kembali ke HomeScreen
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          title: const Text('Store Sedang Digunakan'),
+          content: Text(
+            'Store $storeName sedang digunakan oleh ${shiftRes.kasirNama}.\n\n'
+            'Silakan pilih store lain atau minta kasir tersebut menutup shiftnya.',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1D273B),
+              ),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      _goToHome();
+      return;
+    }
+
+    if (shiftRes.status == ShiftStatus.tidakAda) {
+      // Belum ada shift → tampilkan bottom sheet buka shift (non-dismissible)
+      if (!mounted) return;
+      final shiftID = await _showBukaShiftSheet(
+        storeID: storeID,
+        organisasiID: organisasiID,
+        storeName: storeName,
+      );
+      if (shiftID == 0) {
+        // User tidak bisa dismiss sheet — ini seharusnya tidak terjadi,
+        // tapi sebagai safety net kembalikan ke HomeScreen
+        _goToHome();
+        return;
+      }
+      _shiftID = shiftID;
+    }
+
+    // Shift OK (tidakAda → sudah dibuka, atau milikSaya dari cekShift)
+    if (!mounted) return;
+    await _loadPosData(
+      dio: dio,
+      storeID: storeID,
+      organisasiID: organisasiID,
+      storeName: storeName,
+    );
+  }
+
+  // ============================================================
+  // PHASE 3 — Load data POS (number, channels, cara bayar)
+  // Dipanggil setelah shift dipastikan ada.
+  // ============================================================
+  Future<void> _loadPosData({
+    required Dio dio,
+    required int storeID,
+    required int organisasiID,
+    required String storeName,
+  }) async {
+    final numberRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getNumber',
+        'store_id': storeID,
+        'organisasi_id': organisasiID,
+        'device_token': _deviceToken,
+      }),
+    );
+    final number = numberRes.data['number'];
+
+    final channelRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getChannels',
+        'organisasi_id': organisasiID,
+      }),
+    );
+    _channels = List<Map<String, dynamic>>.from(channelRes.data['data'] ?? []);
+
+    final caraBayarRes = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getCaraBayar',
+        'organisasi_id': organisasiID,
+      }),
+    );
+    _caraBayarList = List<Map<String, dynamic>>.from(
+      caraBayarRes.data['data'] ?? [],
+    );
+
+    ref.read(penjualanProvider.notifier).setInitialData(
+          number: number,
+          storeID: storeID,
+          storeName: storeName,
+          organisasiID: organisasiID,
+          salesTipeID: _channels.isNotEmpty
+              ? int.parse(_channels.first['dim_salestipe_id'].toString())
+              : 0,
+        );
+
+    // WA banner
+    try {
+      final storeDataRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({'action': 'getStoreData', 'store_id': storeID}),
+      );
+      _waDisconnected =
+          (storeDataRes.data['wa_disconnected'] as num? ?? 0).toInt();
+    } catch (_) {}
+
+    if (mounted) _setState(() => _isLoading = false);
+    _loadImageProducts();
+  }
+
+  Future<void> _logout() async {
+    await SessionService.clearSession();
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+    }
+  }
+
+  // ============================================================
+  // STORE PICKER — Modal Bottom Sheet
+  // ============================================================
+  Future<Map<String, dynamic>?> _showStorePicker(
+    List<Map<String, dynamic>> stores,
+  ) async {
+    Map<String, dynamic>? selected;
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setState) => Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
+          ),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.store, color: Color(0xFF1D273B), size: 22),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Pilih Store',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1D273B),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${stores.length} store',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  shrinkWrap: true,
+                  itemCount: stores.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (_, i) {
+                    final s = stores[i];
+                    final isSelected =
+                        selected?['id'].toString() == s['id'].toString();
+                    return InkWell(
+                      onTap: () => setState(() => selected = s),
+                      borderRadius: BorderRadius.circular(10),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF1D273B)
+                              : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF1D273B)
+                                : Colors.grey.shade200,
+                            width: isSelected ? 2 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isSelected ? Icons.store : Icons.store_outlined,
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.grey.shade500,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                s['nama'].toString(),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                            if (isSelected)
+                              const Icon(
+                                Icons.check_circle,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, null),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: selected == null
+                            ? null
+                            : () => Navigator.pop(ctx, selected),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1D273B),
+                        ),
+                        child: Text(
+                          selected == null
+                              ? 'Pilih Store'
+                              : 'Masuk ke ${selected!['nama']}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // BUKA SHIFT
+  // ============================================================
+
+}

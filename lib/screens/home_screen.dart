@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../services/session_service.dart';
 import '../services/api_service.dart';
-import 'penjualan_screen.dart';
+import 'penjualan/penjualan_screen.dart';
 import 'invoice_list_screen.dart';
 import 'login_screen.dart';
 import 'printer_screen.dart';
@@ -48,9 +48,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final session = await SessionService.getSession();
     if (!mounted) return;
     setState(() {
-      _nama     = session['nama']     ?? '';
+      _nama = session['nama'] ?? '';
       _username = session['username'] ?? '';
-      _outlets  = List<int>.from(session['outlets'] ?? []);
+      _outlets = List<int>.from(session['outlets'] ?? []);
     });
     _loadStats();
   }
@@ -71,7 +71,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: {
-          'action':    'getDashboard',
+          'action': 'getDashboard',
           'store_ids': _outlets.join(','),
         },
       ).timeout(const Duration(seconds: 10));
