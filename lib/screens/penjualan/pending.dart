@@ -312,7 +312,11 @@ extension PenjualanPendingX on _PenjualanScreenState {
         _activePendingLabel = res.data['order_nama'] as String? ?? '';
       });
 
-      await _refreshFromApi();
+      // FIX: Load items langsung dari temp_invoice tanpa recalculate harga.
+      // _refreshFromApi() yang lama menyebabkan hpj di-overwrite dengan harga
+      // default dari dim_produk, mengabaikan harga salestipe (ShopeeFood, GrabFood, dll).
+      await _loadItemsFromTemp(restoredNumber);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -322,6 +326,36 @@ extension PenjualanPendingX on _PenjualanScreenState {
         );
       }
     }
+  }
+
+  // ============================================================
+  // LOAD ITEMS FROM TEMP (tanpa recalculate harga)
+  // Dipakai khusus setelah retrievePending agar harga salestipe
+  // tidak ter-overwrite oleh _refreshFromApi().
+  //
+  // PHP action 'getCartItemsAsIs' SELECT langsung dari temp_invoice
+  // tanpa JOIN ke dim_produk — hpj yang tersimpan dipakai as-is.
+  // ============================================================
+  Future<void> _loadItemsFromTemp(String number) async {
+    final dio = ApiService.getDio(token: _token);
+
+    final res = await dio.post(
+      '/penjualan.php',
+      data: FormData.fromMap({
+        'action': 'getCartItemsAsIs',
+        'number': number,
+        'device_token': _deviceToken,
+      }),
+    );
+
+    if (res.data['success'] != true) return;
+
+    final rawItems = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
+    final items = rawItems.map((j) => CartItem.fromJson(j)).toList();
+
+    // updateItems() menghitung ulang gross/diskon/total dari item.subtotal
+    // yang sudah tersimpan di temp — hpj tidak diubah sama sekali.
+    ref.read(penjualanProvider.notifier).updateItems(items);
   }
 
   // Void pending order (server: UPDATE status = 'VO', bukan delete keras —
@@ -698,5 +732,4 @@ extension PenjualanPendingX on _PenjualanScreenState {
       }
     }
   }
-
 }

@@ -18,15 +18,11 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   String _token = '';
   int _userID = 0;
   int _organisasiID = 0;
-  // Store data — dipakai untuk print & WA & email
+
+  // Store aktif shift — HANYA untuk filter invoice & isFnB.
+  // TIDAK dipakai sebagai sumber data header struk cetak.
   int _activeStoreID = 0;
-  String _activeStoreName = '';
-  String _activeStoreAddress = '';
-  String _activeStoreNpwp = '';
-  String _activeInvoiceNote = '';
-  String _logoFileName = '';
-  String _logoUrl = '';
-  bool _isFnB = false; // true jika jasa_perusahaan == 3
+  bool _isFnB = false;
   bool _isMultiStore = false;
   bool _isLoading = true;
   DateTime _dateFrom = DateTime.now();
@@ -69,6 +65,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
       final dio = ApiService.getDio(token: _token);
 
+      // 1. Ambil daftar store yang accessible
       final storeRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'getStores',
@@ -77,6 +74,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
       _isMultiStore = stores.length > 1;
 
+      // Default ke store pertama
       _activeStoreID = int.parse(stores.first['id'].toString());
 
       final orgRes = await dio.post('/penjualan.php',
@@ -87,7 +85,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       _organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
       _isFnB = (orgRes.data['is_fnb'] == 1);
 
-      // ✅ cekShiftUser DULU — biar _activeStoreID final
+      // 2. Cek shift aktif user — override activeStoreID & organisasiID
+      //    untuk keperluan FILTER INVOICE saja.
+      //    Data header struk (nama, alamat, logo, dll) TIDAK diambil di sini;
+      //    akan di-fetch per-invoice saat user menekan tombol print.
       final shiftRes = await dio.post('/penjualan.php',
           data: FormData.fromMap({
             'action': 'cekShiftUser',
@@ -96,24 +97,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
       if (shiftRes.data['has_shift'] == true) {
         _activeStoreID = shiftRes.data['store_id'];
-        _activeStoreName = shiftRes.data['store_nama'];
         _organisasiID = int.parse(shiftRes.data['organisasi_id'].toString());
         _isFnB = (shiftRes.data['is_fnb'] == 1);
-      } else {
-        _activeStoreName = stores.first['nama'].toString();
       }
-
-      // ✅ getStoreData SETELAH shift resolved — _activeStoreID sudah benar
-      final settingRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStoreData',
-            'store_id': _activeStoreID,
-          }));
-      _activeStoreAddress = settingRes.data['alamat'] ?? '';
-      _activeStoreNpwp = settingRes.data['npwp'] ?? '';
-      _activeInvoiceNote = settingRes.data['invoice_note'] ?? '';
-      _logoFileName = settingRes.data['logo_file_name'] ?? '';
-      _logoUrl = settingRes.data['logo_url'] ?? '';
 
       await _loadInvoices();
       setState(() => _isLoading = false);
@@ -234,6 +220,26 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     };
   }
 
+  // ── Fetch store data berdasarkan store_id invoice ────────────
+  //
+  // PENTING: method ini sengaja menerima store_id dari invoice,
+  // bukan dari _activeStoreID. Ini memastikan header struk selalu
+  // menampilkan nama/alamat/logo store tempat transaksi terjadi,
+  // tidak peduli user sedang open shift di store mana.
+  Future<Map<String, dynamic>> _fetchStoreData(int storeId) async {
+    try {
+      final dio = ApiService.getDio(token: _token);
+      final res = await dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getStoreData',
+            'store_id': storeId,
+          }));
+      return Map<String, dynamic>.from(res.data);
+    } catch (_) {
+      return {};
+    }
+  }
+
   // ── ENTRY POINT print dari list ──────────────────────────────
   //
   // Untuk FnB → tampilkan bottom sheet pilih Customer/Kitchen/Keduanya
@@ -321,8 +327,11 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   // [printCustomer] — cetak customer copy
   // [printKitchen]  — cetak kitchen copy
   //
-  // trackPrint dipanggil sekali di sini untuk mendapat copyCount
-  // yang dipakai sebagai ribbon pada kedua jenis struk.
+  // FIX BUG: store data (nama, alamat, logo, npwp, dll) di-fetch
+  // berdasarkan store_id yang ada di dalam data invoice itu sendiri,
+  // bukan dari _activeStoreID (yang bisa ter-override oleh shift user
+  // di store berbeda). Dengan begitu struk selalu menampilkan outlet
+  // yang benar meskipun user sedang open shift di outlet lain.
   Future<void> _doPrint(
     Map<String, dynamic> invoice, {
     required bool printCustomer,
@@ -333,38 +342,52 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       final connected = await _ensurePrinterConnected();
       if (!connected) return;
 
-      // 2. Ambil items & log print (dapat copyCount) secara paralel
+      // 2. Ambil store_id dari invoice — ini yang BENAR untuk header struk
+      final invoiceStoreId = invoice['store_id'] as int? ?? _activeStoreID;
+
+      // 3. Fetch items, copyCount, dan store data secara paralel
       final results = await Future.wait([
         _fetchItems(invoice['id'] as int),
         _trackPrint(invoice['kode']),
+        _fetchStoreData(invoiceStoreId),
       ]);
+
       final fetchResult = results[0] as Map<String, dynamic>;
       final items = fetchResult['items'] as List<Map<String, dynamic>>;
       final keteranganTrx = fetchResult['keterangan'] as String;
+
       // Print dari invoice list SELALU reprint — pastikan ribbon muncul.
       // trackPrint sudah increment di server; kalau first print POS tidak
       // track, offset +1 agar copyCount minimal 2 (ribbon selalu tampil).
       final rawCount = results[1] as int;
       final copyCount = rawCount < 2 ? 2 : rawCount;
 
-      // 3. Siapkan data bersama
+      // 4. Store data dari invoice — BUKAN dari shift user
+      final storeData = results[2] as Map<String, dynamic>;
+      final storeName    = invoice['store']?.toString() ?? '';
+      final storeAddress = storeData['alamat']?.toString() ?? '';
+      final storeNpwp    = storeData['npwp']?.toString() ?? '';
+      final invoiceNote  = storeData['invoice_note']?.toString() ?? '';
+      final logoFileName = storeData['logo_file_name']?.toString() ?? '';
+      final logoUrl      = storeData['logo_url']?.toString() ?? '';
+
+      // 5. Waktu transaksi
       final tanggal = invoice['tanggal'].toString().length >= 16
           ? invoice['tanggal'].toString().substring(0, 16)
           : invoice['tanggal'].toString();
 
-      // Jam transaksi dari created_date (format: "2024-01-15 14:30:00" → "14:30")
       final createdDateRaw = invoice['created_date']?.toString() ?? '';
       final jamTransaksi = createdDateRaw.length >= 16
           ? createdDateRaw.substring(11, 16)
           : (createdDateRaw.length >= 13 ? createdDateRaw.substring(11) : '');
 
-      // 4. Print customer copy
+      // 6. Print customer copy
       if (printCustomer) {
         await PrinterHelper.printInvoice(
-          storeName: _activeStoreName,
-          storeAddress: _activeStoreAddress,
-          npwp: _activeStoreNpwp,
-          invoiceNote: _activeInvoiceNote,
+          storeName: storeName,
+          storeAddress: storeAddress,
+          npwp: storeNpwp,
+          invoiceNote: invoiceNote,
           invoiceNumber: invoice['kode'],
           tanggal: tanggal,
           kasir: invoice['kasir'] ?? '',
@@ -380,23 +403,23 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           kembalian: (invoice['kembalian'] as num).toDouble(),
           voucherKode: invoice['voucher_kode'],
           keterangan: keteranganTrx,
-          logoFileName: _logoFileName.isNotEmpty ? _logoFileName : null,
-          logoUrl: _logoUrl.isNotEmpty ? _logoUrl : null,
+          logoFileName: logoFileName.isNotEmpty ? logoFileName : null,
+          logoUrl: logoUrl.isNotEmpty ? logoUrl : null,
           copyCount: copyCount,
           salesTipe: invoice['sales_tipe'] ?? '',
           jamTransaksi: jamTransaksi.isNotEmpty ? jamTransaksi : null,
         );
       }
 
-      // 5. Jeda singkat sebelum kitchen agar buffer tidak penuh
+      // 7. Jeda singkat sebelum kitchen agar buffer tidak penuh
       if (printCustomer && printKitchen) {
         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-      // 6. Print kitchen copy
+      // 8. Print kitchen copy
       if (printKitchen) {
         await PrinterHelper.printKitchen(
-          storeName: _activeStoreName,
+          storeName: storeName,
           invoiceNumber: invoice['kode'],
           tanggal: tanggal,
           kasir: invoice['kasir'] ?? '',
@@ -454,7 +477,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           data: FormData.fromMap({
             'action': 'kirimWA',
             'number': invoice['kode'],
-            'store_id': _activeStoreID,
+            'store_id': invoice['store_id'] ?? _activeStoreID,
             'organisasi_id': _organisasiID,
             'member_id': invoice['dim_bp_id'] ?? 0,
           }));
@@ -503,7 +526,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           data: FormData.fromMap({
             'action': 'kirimEmail',
             'number': invoice['kode'],
-            'store_id': _activeStoreID,
+            'store_id': invoice['store_id'] ?? _activeStoreID,
             'organisasi_id': _organisasiID,
             'member_id': invoice['dim_bp_id'] ?? 0,
           }));

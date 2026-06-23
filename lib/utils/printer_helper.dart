@@ -103,11 +103,6 @@ class PrinterHelper {
 
   // ── Print invoice (customer copy) ───────────────────────────
   //
-  // [copyCount] — berapa kali invoice ini sudah dicetak (termasuk ini).
-  //   copyCount == 1  → first print, tidak ada ribbon COPY
-  //   copyCount >= 2  → reprint, tampilkan ribbon "***** COPY N *****"
-  //   Nilai N = copyCount - 1  (misal print ke-2 = COPY 1, ke-3 = COPY 2)
-  //
   // [items] — setiap Map boleh mengandung field berikut:
   //   'nama'            String   — nama produk (wajib)
   //   'qty'             num      — kuantitas (wajib)
@@ -139,7 +134,7 @@ class PrinterHelper {
     required double nominalBayar,
     required double kembalian,
     // ── Field opsional ──────────────────────────────────────────
-    int copyCount = 1, // 1 = first print, >=2 = reprint
+    int copyCount = 0, // 0 = first print, >=1 = reprint
     double storeTax = 0, // dari dim_divisi.tax — jika > 0 tampilkan DPP & pajak
     String? voucherKode,
     String? npwp,
@@ -209,13 +204,9 @@ class PrinterHelper {
     bytes += generator.hr();
 
     // ── FIX #4: RIBBON COPY — hanya muncul saat reprint ─────────
-    // Pastikan caller pass copyCount >= 2 saat reprint.
-    // Contoh: copyCount = 2 → "***** COPY 1 *****"
-    //         copyCount = 3 → "***** COPY 2 *****"
-    if (copyCount >= 2) {
-      final copyNum = copyCount - 1;
+    if (copyCount >= 1) {
       bytes += generator.text(
-        '*** COPY $copyNum ***',
+        '*** COPY $copyCount ***',
         styles: const PosStyles(
           align: PosAlign.center,
           bold: true,
@@ -363,27 +354,35 @@ class PrinterHelper {
 
     bytes += generator.hr();
 
-    // Bayar & kembali
+    // ── Bayar ────────────────────────────────────────────────────
+    bytes += generator.text('Bayar :');
     bytes += generator.row([
-      PosColumn(text: 'Bayar ($caraBayar)', width: 6),
+      PosColumn(text: caraBayar, width: 6),
       PosColumn(
         text: _formatNumber(nominalBayar),
         width: 6,
         styles: const PosStyles(align: PosAlign.right),
       ),
     ]);
-    bytes += generator.row([
-      PosColumn(
-        text: 'Kembali',
-        width: 6,
-        styles: const PosStyles(bold: true),
-      ),
-      PosColumn(
-        text: _formatNumber(kembalian),
-        width: 6,
-        styles: const PosStyles(align: PosAlign.right, bold: true),
-      ),
-    ]);
+
+    // ── Kembali — hanya untuk pembayaran tunai ───────────────────
+    final isCash = caraBayar.toLowerCase().contains('cash') ||
+        caraBayar.toLowerCase().contains('tunai');
+
+    if (isCash) {
+      bytes += generator.row([
+        PosColumn(
+          text: 'Kembali',
+          width: 6,
+          styles: const PosStyles(bold: true),
+        ),
+        PosColumn(
+          text: _formatNumber(kembalian),
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right, bold: true),
+        ),
+      ]);
+    }
 
     bytes += generator.hr();
 
@@ -432,7 +431,6 @@ class PrinterHelper {
   // Parameter [tableInfo] opsional — bisa diisi "Meja 3", "Takeaway",
   // nama customer, dll. sesuai kebutuhan bisnis.
   //
-  // [copyCount] — sama seperti printInvoice, >= 2 = reprint ribbon
   static Future<bool> printKitchen({
     required String storeName,
     required String invoiceNumber,
@@ -441,7 +439,7 @@ class PrinterHelper {
     required List<Map<String, dynamic>> items,
     double total =
         0, // tidak dipakai di struk, disimpan untuk kompatibilitas caller
-    int copyCount = 1, // 1 = first print, >=2 = reprint
+    int copyCount = 0, // 0 = first print, >=1 = reprint
     String memberNama = '', // nama member — tampil di bawah kasir
     String? tableInfo, // meja / nama customer / takeaway
     String? salesTipe, // channel penjualan (dine-in, takeaway, dll)
@@ -478,10 +476,9 @@ class PrinterHelper {
     bytes += generator.hr();
 
     // ── RIBBON COPY KITCHEN — hanya saat reprint ─────────────────
-    if (copyCount >= 2) {
-      final copyNum = copyCount - 1;
+    if (copyCount >= 1) {
       bytes += generator.text(
-        '*** COPY $copyNum ***',
+        '*** COPY $copyCount ***',
         styles: const PosStyles(
           align: PosAlign.center,
           bold: true,
@@ -601,7 +598,6 @@ class PrinterHelper {
   // ── Helper: print customer + kitchen sekaligus (1 printer) ──
   //
   // Panggil method ini setelah payment sukses untuk FnB.
-  // First print selalu copyCount=1 (tidak ada ribbon).
   // Jika bisnis punya 2 printer, panggil printInvoice dan
   // printKitchen secara terpisah dengan connect ke MAC masing-masing.
   static Future<({bool customer, bool kitchen})> printBoth({
@@ -661,7 +657,7 @@ class PrinterHelper {
       logoFileName: logoFileName,
       logoUrl: logoUrl,
       jamTransaksi: jamTransaksi,
-      copyCount: 1,
+      copyCount: 0,
     );
 
     await Future.delayed(const Duration(milliseconds: 500));
@@ -679,7 +675,7 @@ class PrinterHelper {
       orderNote: orderNote,
       keterangan: keterangan,
       jamTransaksi: jamTransaksi,
-      copyCount: 1,
+      copyCount: 0,
     );
 
     return (customer: customerOk, kitchen: kitchenOk);
