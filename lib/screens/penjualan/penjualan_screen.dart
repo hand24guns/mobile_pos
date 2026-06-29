@@ -207,6 +207,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
         centerTitle: true,
         actions: [
           IconButton(
+            icon: const Icon(Icons.home_outlined, color: Colors.white),
+            tooltip: 'Home',
+            onPressed: () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const HomeScreen()),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.receipt, color: Colors.white),
             tooltip: 'Invoice List',
             onPressed: () => Navigator.push(
