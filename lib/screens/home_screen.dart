@@ -6,6 +6,7 @@ import '../services/session_service.dart';
 import '../services/api_service.dart';
 import 'penjualan/penjualan_screen.dart';
 import 'invoice_list_screen.dart';
+import 'laporan_pembayaran_screen.dart';
 import 'login_screen.dart';
 import 'printer_screen.dart';
 
@@ -354,35 +355,94 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               SizedBox(height: compact ? 10 : 14),
 
               // ── Menu Tiles ──────────────────────────────
-              Row(
-                children: [
-                  Expanded(
-                    child: _MenuTile(
-                      icon: Icons.shopping_cart_rounded,
-                      label: 'PENJUALAN',
-                      description: 'Kasir & transaksi penjualan produk',
-                      compact: compact,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const PenjualanScreen())),
+              // Landscape / tablet (w >= 600): 1 row, 3 card
+              // Portrait / phone  (w <  600): 2 row — PENJUALAN+INVOICE atas, CARA BAYAR bawah
+              if (w >= 600) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.shopping_cart_rounded,
+                        label: 'PENJUALAN',
+                        description: 'Kasir & transaksi penjualan produk',
+                        compact: compact,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const PenjualanScreen())),
+                      ),
                     ),
-                  ),
-                  SizedBox(width: gap),
-                  Expanded(
-                    child: _MenuTile(
-                      icon: Icons.description_rounded,
-                      label: 'INVOICE',
-                      description: 'Riwayat transaksi & cetak ulang invoice',
-                      compact: compact,
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const InvoiceListScreen())),
+                    SizedBox(width: gap),
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.description_rounded,
+                        label: 'INVOICE',
+                        description: 'Riwayat transaksi & cetak ulang invoice',
+                        compact: compact,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const InvoiceListScreen())),
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                    SizedBox(width: gap),
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.payments_rounded,
+                        label: 'CARA BAYAR',
+                        description: 'Rekap omset per metode pembayaran',
+                        compact: compact,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    const LaporanPembayaranScreen())),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.shopping_cart_rounded,
+                        label: 'PENJUALAN',
+                        description: 'Kasir & transaksi penjualan produk',
+                        compact: compact,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const PenjualanScreen())),
+                      ),
+                    ),
+                    SizedBox(width: gap),
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.description_rounded,
+                        label: 'INVOICE',
+                        description: 'Riwayat transaksi & cetak ulang invoice',
+                        compact: compact,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const InvoiceListScreen())),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: gap),
+                _MenuTile(
+                  icon: Icons.payments_rounded,
+                  label: 'CARA BAYAR',
+                  description: 'Rekap omset per metode pembayaran hari ini',
+                  compact: compact,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const LaporanPembayaranScreen())),
+                ),
+              ],
               SizedBox(height: compact ? 8 : 20),
             ],
           ),
