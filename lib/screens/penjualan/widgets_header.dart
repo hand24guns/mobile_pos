@@ -5,61 +5,434 @@ part of 'penjualan_screen.dart';
 
 extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
   Widget _buildHeader(PenjualanState state) {
+    if (_isHeaderTiny) return _buildHeaderTiny(state);
     if (_isCompactHeader) return _buildHeaderCompact(state);
     return _buildHeaderFull(state);
   }
 
+  // ── TINY HEADER (7" landscape, semua nav type) ───────────────
+  // 1 baris saja: store+channel+sku search dalam 1 Row horizontal.
+  // Member, Voucher, Keterangan tersembunyi — akses via ikon kecil.
+  // Tinggi total: ~52dp agar grid produk mendapat ≥300dp ruang
+  // dan muat minimal 2 baris produk (cell ~183dp + spacing).
+  Widget _buildHeaderTiny(PenjualanState state) {
+    final inputDeco = InputDecoration(
+      border: const OutlineInputBorder(),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      isDense: true,
+    );
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      child: Row(
+        children: [
+          // Store name + nomor invoice (teks sangat kecil)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                state.storeName,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                state.number,
+                style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+
+          // Channel dropdown — compact
+          Expanded(
+            flex: 3,
+            child: DropdownButtonFormField<int>(
+              initialValue: state.salesTipeID,
+              decoration: inputDeco.copyWith(hintText: 'Channel'),
+              style: const TextStyle(fontSize: 11, color: Colors.black87),
+              isDense: true,
+              items: _channels.map((c) {
+                return DropdownMenuItem<int>(
+                  value: int.parse(c['dim_salestipe_id'].toString()),
+                  child: Text(c['nama'],
+                      style: const TextStyle(fontSize: 11)),
+                );
+              }).toList(),
+              onChanged: (val) async {
+                if (val != null) {
+                  ref.read(penjualanProvider.notifier).setSalesTipe(val);
+                }
+                final s = ref.read(penjualanProvider);
+                if (s.items.isNotEmpty) {
+                  try {
+                    final dio = ApiService.getDio(token: _token);
+                    await dio.post(
+                      '/penjualan.php',
+                      data: FormData.fromMap({
+                        'action': 'recalculateChannel',
+                        'number': s.number,
+                        'salestipe_id': val,
+                        'store_id': s.storeID,
+                        'organisasi_id': s.organisasiID,
+                        'device_token': _deviceToken,
+                      }),
+                    );
+                    await _refreshFromApi();
+                  } catch (_) {}
+                }
+                _loadImageProducts();
+                _focusSku();
+              },
+            ),
+          ),
+          const SizedBox(width: 6),
+
+          // ── Ikon-ikon aksi: Member | Voucher | Retur | Keterangan ──
+          // Setiap ikon punya label teks kecil di bawahnya agar kasir baru
+          // langsung tahu fungsinya tanpa harus long-press tooltip.
+          _buildTinyIconBtn(
+            icon: state.memberID != null
+                ? Icons.person
+                : Icons.person_outline,
+            label: state.memberID != null ? 'Member ✓' : 'Member',
+            color: state.memberID != null
+                ? const Color(0xFF1D273B)
+                : Colors.grey.shade600,
+            badge: state.memberID != null,
+            badgeColor: const Color(0xFF1D273B),
+            onTap: () {
+              if (state.memberID != null) {
+                _memberController.clear();
+                ref.read(penjualanProvider.notifier).setMember(null, '');
+                _setState(() {});
+              } else {
+                _showMemberSearchSheet(state);
+              }
+            },
+          ),
+          _buildTinyIconBtn(
+            icon: Icons.confirmation_number_outlined,
+            label: 'Voucher',
+            color: _activeVoucher.isNotEmpty
+                ? Colors.indigo
+                : Colors.grey.shade600,
+            badge: _activeVoucher.isNotEmpty,
+            badgeColor: Colors.indigo,
+            onTap: _showVoucherDialog,
+          ),
+          _buildTinyIconBtn(
+            icon: Icons.assignment_return_outlined,
+            label: 'Retur',
+            color: Colors.red.shade400,
+            onTap: _showReturDialog,
+          ),
+          _buildTinyIconBtn(
+            icon: _keteranganController.text.isNotEmpty
+                ? Icons.edit_note
+                : Icons.notes_outlined,
+            label: 'Catatan',
+            color: _keteranganController.text.isNotEmpty
+                ? Colors.amber.shade700
+                : Colors.grey.shade600,
+            badge: _keteranganController.text.isNotEmpty,
+            badgeColor: Colors.amber.shade700,
+            onTap: _showKeteranganSheet,
+          ),
+          const SizedBox(width: 2),
+
+          // Cari SKU — field utama untuk barcode scanner
+          Expanded(
+            flex: 4,
+            child: TextField(
+              controller: _skuController,
+              focusNode: _skuFocusNode,
+              decoration: inputDeco.copyWith(
+                hintText: 'Cari / scan SKU',
+                hintStyle: const TextStyle(fontSize: 11),
+                prefixIcon: const Icon(Icons.qr_code_scanner, size: 16),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.search, size: 16),
+                  padding: EdgeInsets.zero,
+                  onPressed: () =>
+                      _searchProduk(_skuController.text.trim()),
+                ),
+              ),
+              style: const TextStyle(fontSize: 11),
+              onSubmitted: (val) => _searchProduk(val.trim()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper: bottom sheet keterangan transaksi untuk _buildHeaderTiny
+  void _showKeteranganSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+          left: 16,
+          right: 16,
+          top: 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Keterangan Transaksi',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _keteranganController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Catatan transaksi (opsional)...',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.notes_outlined),
+              ),
+              maxLines: 2,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) {
+                Navigator.pop(context);
+                _setState(() {}); // refresh badge
+                _focusSku();
+              },
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    _keteranganController.clear();
+                    Navigator.pop(context);
+                    _setState(() {}); // hapus badge
+                    _focusSku();
+                  },
+                  child: const Text(
+                    'Hapus',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _setState(() {}); // refresh badge
+                    _focusSku();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1D273B),
+                  ),
+                  child: const Text(
+                    'Simpan',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Widget ikon + label kecil di bawahnya untuk _buildHeaderTiny.
+  /// Dipakai untuk Member, Voucher, Retur, Keterangan — agar kasir baru
+  /// langsung tahu fungsi setiap ikon tanpa long-press.
+  Widget _buildTinyIconBtn({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    bool badge = false,
+    Color badgeColor = Colors.red,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: color),
+                const SizedBox(height: 1),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    color: color,
+                    fontWeight: FontWeight.w500,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (badge)
+            Positioned(
+              right: 2,
+              top: 0,
+              child: Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showMemberSearchSheet(PenjualanState state) {
+    final searchCtrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: searchCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Cari Member',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.search),
+                ),
+                onSubmitted: (val) async {
+                  if (val.isEmpty) return;
+                  final dio = ApiService.getDio(token: _token);
+                  final res = await dio.post(
+                    '/penjualan.php',
+                    data: FormData.fromMap({
+                      'action': 'searchMember',
+                      'term': val,
+                      'organisasi_id': state.organisasiID,
+                    }),
+                  );
+                  final data = List<Map<String, dynamic>>.from(
+                    res.data['data'],
+                  );
+                  if (data.isEmpty) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Member tidak ditemukan'),
+                        ),
+                      );
+                    }
+                    return;
+                  }
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  showModalBottomSheet(
+                    context: context,
+                    builder: (_) => ListView.builder(
+                      itemCount: data.length,
+                      itemBuilder: (_, i) {
+                        final m = data[i];
+                        return ListTile(
+                          leading: const Icon(Icons.person),
+                          title: Text(m['nama']),
+                          subtitle: Text(m['telp']),
+                          onTap: () {
+                            Navigator.pop(context);
+                            _memberController.text =
+                                '${m['nama']} - ${m['telp']}';
+                            ref
+                                .read(penjualanProvider.notifier)
+                                .setMember(
+                                  int.parse(m['dim_bp_id'].toString()),
+                                  m['nama'],
+                                );
+                            _focusSku();
+                          },
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── FULL HEADER (portrait / tablet besar) ───────────────────
   Widget _buildHeaderFull(PenjualanState state) {
+    // Dekorasi input kompak — tanpa labelText (pakai hintText saja)
+    // agar tidak ada float label yang makan tinggi ekstra.
+    const inputDeco = InputDecoration(
+      border: OutlineInputBorder(),
+      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      isDense: true,
+    );
+
     return Container(
       color: Colors.white,
       padding: _panelPadding,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Row 1: Store + Invoice
+          // ── Baris 1: Store + No. Invoice inline (teks kecil, 1 baris) ──
           Row(
             children: [
+              const Icon(Icons.store_outlined, size: 14, color: Colors.grey),
+              const SizedBox(width: 4),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Store',
-                      style: TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                    Text(
-                      state.storeName,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ],
+                child: Text(
+                  state.storeName,
+                  style: TextStyle(
+                    fontSize: _labelFontSize,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text(
-                    'No. Invoice',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                  Text(
-                    state.number,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ],
+              const SizedBox(width: 8),
+              Text(
+                state.number,
+                style: TextStyle(
+                  fontSize: _smallFontSize,
+                  color: Colors.grey.shade600,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
 
-          // Row 2: Channel
+          // ── Baris 2: Channel ──
           DropdownButtonFormField<int>(
             initialValue: state.salesTipeID,
-            decoration: const InputDecoration(
-              labelText: 'Channel',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              isDense: true,
-            ),
+            decoration: inputDeco.copyWith(hintText: 'Channel'),
             items: _channels.map((c) {
               return DropdownMenuItem<int>(
                 value: int.parse(c['dim_salestipe_id'].toString()),
@@ -70,8 +443,6 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
               if (val != null) {
                 ref.read(penjualanProvider.notifier).setSalesTipe(val);
               }
-
-              // Recalculate harga cart jika sudah ada item
               final state = ref.read(penjualanProvider);
               if (state.items.isNotEmpty) {
                 try {
@@ -90,33 +461,25 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                   await _refreshFromApi();
                 } catch (_) {}
               }
-
-              // Reload grid produk agar harga tile ikut berubah
               _loadImageProducts();
+              _focusSku();
             },
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
 
-          // Row 3: Member (search + add baru) + Voucher + Retur
+          // ── Baris 3: Member | Voucher | Retur ──
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _memberController,
-                  decoration: InputDecoration(
-                    labelText: 'Member (opsional)',
-                    border: const OutlineInputBorder(),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    isDense: true,
-                    // ── Ikon di kiri: add member / clear ──────────
+                  decoration: inputDeco.copyWith(
+                    hintText: 'Member (opsional)',
                     prefixIcon: state.memberID != null
                         ? IconButton(
                             icon: const Icon(
                               Icons.close,
-                              size: 18,
+                              size: 16,
                               color: Colors.red,
                             ),
                             tooltip: 'Hapus member',
@@ -130,14 +493,13 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                         : IconButton(
                             icon: const Icon(
                               Icons.person_add,
-                              size: 18,
+                              size: 16,
                               color: Color(0xFF1D273B),
                             ),
                             tooltip: 'Tambah member baru',
                             onPressed: _showAddMemberSheet,
                           ),
-                    // ── Ikon search di kanan ─────────────────────
-                    suffixIcon: const Icon(Icons.search, size: 18),
+                    suffixIcon: const Icon(Icons.search, size: 16),
                   ),
                   onSubmitted: (val) async {
                     if (val.isEmpty) return;
@@ -178,10 +540,13 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                                 Navigator.pop(context);
                                 _memberController.text =
                                     '${m['nama']} - ${m['telp']}';
-                                ref.read(penjualanProvider.notifier).setMember(
+                                ref
+                                    .read(penjualanProvider.notifier)
+                                    .setMember(
                                       int.parse(m['dim_bp_id'].toString()),
                                       m['nama'],
                                     );
+                                _focusSku();
                               },
                             );
                           },
@@ -192,20 +557,20 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                 ),
               ),
               const SizedBox(width: 8),
-              // Voucher badge jika aktif
+              // Voucher badge
               Stack(
                 children: [
                   OutlinedButton.icon(
                     onPressed: _showVoucherDialog,
                     icon: const Icon(
                       Icons.confirmation_number_outlined,
-                      size: 18,
+                      size: 16,
                     ),
                     label: const Text('Voucher'),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
+                        horizontal: 10,
+                        vertical: 9,
                       ),
                       foregroundColor:
                           _activeVoucher.isNotEmpty ? Colors.indigo : null,
@@ -232,53 +597,56 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
               const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: _showReturDialog,
-                icon: const Icon(Icons.assignment_return_outlined, size: 18),
+                icon: const Icon(Icons.assignment_return_outlined, size: 16),
                 label: const Text('Retur'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.red,
                   side: const BorderSide(color: Colors.red),
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
+                    horizontal: 10,
+                    vertical: 9,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
 
-          // Row 3.5: Keterangan Transaksi
-          TextField(
-            controller: _keteranganController,
-            decoration: const InputDecoration(
-              labelText: 'Keterangan transaksi (opsional)',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              isDense: true,
-              prefixIcon: Icon(Icons.notes_outlined, size: 18),
-            ),
-            maxLines: 1,
-            textInputAction: TextInputAction.done,
-          ),
-          const SizedBox(height: 8),
-
-          // Row 4: SKU Search
-          TextField(
-            controller: _skuController,
-            decoration: InputDecoration(
-              labelText: 'Cari produk (nama / SKU)',
-              border: const OutlineInputBorder(),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
+          // ── Baris 4: Keterangan | Cari SKU (2 kolom dalam 1 baris) ──
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _keteranganController,
+                  decoration: inputDeco.copyWith(
+                    hintText: 'Keterangan (opsional)',
+                    prefixIcon:
+                        const Icon(Icons.notes_outlined, size: 16),
+                  ),
+                  maxLines: 1,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _focusSku(),
+                ),
               ),
-              isDense: true,
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.search),
-                onPressed: () => _searchProduk(_skuController.text.trim()),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _skuController,
+                  focusNode: _skuFocusNode,
+                  decoration: inputDeco.copyWith(
+                    hintText: 'Cari produk (nama / SKU)',
+                    prefixIcon:
+                        const Icon(Icons.qr_code_scanner, size: 16),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.search, size: 18),
+                      onPressed: () =>
+                          _searchProduk(_skuController.text.trim()),
+                    ),
+                  ),
+                  onSubmitted: (val) => _searchProduk(val.trim()),
+                ),
               ),
-            ),
-            onSubmitted: (val) => _searchProduk(val.trim()),
+            ],
           ),
         ],
       ),
@@ -375,6 +743,7 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                       } catch (_) {}
                     }
                     _loadImageProducts();
+                    _focusSku();
                   },
                 ),
               ),
@@ -460,6 +829,7 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                                       int.parse(m['dim_bp_id'].toString()),
                                       m['nama'],
                                     );
+                                _focusSku();
                               },
                             );
                           },
@@ -583,6 +953,7 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
               Expanded(
                 child: TextField(
                   controller: _skuController,
+                  focusNode: _skuFocusNode,
                   style: TextStyle(fontSize: _labelFontSize),
                   decoration: inputDeco.copyWith(
                     labelText: 'Cari produk (nama / SKU)',

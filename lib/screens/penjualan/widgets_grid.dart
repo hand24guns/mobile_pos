@@ -33,7 +33,7 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
       length: _imageCategories.length,
       child: Column(
         children: [
-          // Tab bar kategori
+          // Tab bar kategori — lebih tipis di tiny tablet
           Container(
             color: Colors.white,
             child: TabBar(
@@ -42,6 +42,9 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
               labelColor: const Color(0xFF1D273B),
               unselectedLabelColor: Colors.grey,
               indicatorColor: const Color(0xFF1D273B),
+              labelPadding: EdgeInsets.symmetric(
+                horizontal: _isTinyTablet ? 10 : 16,
+              ),
               labelStyle: TextStyle(
                 fontSize: _isTinyTablet ? 11 : 13,
                 fontWeight: FontWeight.w600,
@@ -49,8 +52,14 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
               unselectedLabelStyle: TextStyle(
                 fontSize: _isTinyTablet ? 11 : 13,
               ),
+              // Kurangi tinggi tab bar di tiny tablet: default 46dp → 34dp
               tabs: _imageCategories
-                  .map((cat) => Tab(text: cat['nama']?.toString() ?? ''))
+                  .map((cat) => SizedBox(
+                        height: _isTinyTablet ? 34 : 46,
+                        child: Center(
+                          child: Text(cat['nama']?.toString() ?? ''),
+                        ),
+                      ))
                   .toList(),
             ),
           ),
@@ -68,109 +77,159 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
     );
   }
 
-  /// Grid produk gambar (dipakai oleh _buildImageGrid)
+  /// Grid produk gambar (dipakai oleh _buildImageGrid) — SELALU 4 kolom.
+  ///
+  /// Gambar dibuat square (1:1) via AspectRatio, dan childAspectRatio
+  /// grid dihitung dinamis dari lebar cell aktual (bukan angka statis),
+  /// dengan rumus:
+  ///   tinggi cell = lebar cell (gambar square) + tinggi area teks
+  /// Tinggi area teks dihitung dari font size nama (2 baris) + harga
+  /// (1 baris) + padding, jadi nama & harga selalu punya ruang cukup
+  /// dan tidak ter-truncate meski di tablet 7" 3-button nav (body sempit).
   Widget _buildProductGrid(List<Map<String, dynamic>> products) {
-    return GridView.builder(
-      padding: EdgeInsets.all(_isTinyTablet ? 6 : 10),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: _gridColumns,
-        mainAxisSpacing: _isTinyTablet ? 6 : 10,
-        crossAxisSpacing: _isTinyTablet ? 6 : 10,
-        childAspectRatio: 0.72,
-      ),
-      itemCount: products.length,
-      itemBuilder: (_, i) {
-        final p = products[i];
-        final imageUrl = p['image']?.toString() ?? '';
-        final nama = p['nama']?.toString() ?? '';
-        final kode = p['kode']?.toString() ?? '';
-        final hpj = (p['hpj'] as num? ?? 0).toDouble();
+    // Padding dan spacing lebih kecil di tiny tablet untuk hemat ruang vertikal
+    final double gridPadding = _isTinyTablet ? 4 : 10;
+    final double spacing = _isTinyTablet ? 4 : 10;
+    final int columns = _gridColumns;
 
-        final isProcessing = _processingKodes.contains(kode);
+    final double nameFontSize = _isTinyTablet ? 10.0 : 12;
+    final double priceFontSize = _isTinyTablet ? 10.0 : 12;
+    // Tiny: padding lebih kecil (4dp total) agar cell lebih pendek
+    final double textVerticalPadding = _isTinyTablet ? 4 : 10;
+    final double textGap = 2;
+    final double safetyBuffer = 2;
+    // Tiny tablet: nama 1 baris saja agar cell lebih pendek → muat 2 baris grid
+    final int nameMaxLines = _isTinyTablet ? 1 : 2;
 
-        return GestureDetector(
-          onTap: isProcessing ? null : () => _insertProduk(kode),
-          child: Opacity(
-            opacity: isProcessing ? 0.55 : 1.0,
-            child: Card(
-              elevation: 2,
-              clipBehavior: Clip.antiAlias,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Stack(
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Lebar 1 cell setelah dikurangi padding grid & spacing antar kolom
+        final double cellWidth = (constraints.maxWidth -
+                (gridPadding * 2) -
+                (spacing * (columns - 1))) /
+            columns;
+
+        // Tinggi area teks: nama (1 atau 2 baris) + gap + harga + padding
+        final double textHeight = (nameFontSize * 1.25 * nameMaxLines) +
+            textGap +
+            (priceFontSize * 1.25) +
+            textVerticalPadding +
+            safetyBuffer;
+
+        // Tinggi total cell = gambar square (= cellWidth) + area teks
+        final double cellHeight = cellWidth + textHeight;
+        final double childAspectRatio = cellWidth / cellHeight;
+
+        return GridView.builder(
+          padding: EdgeInsets.all(gridPadding),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: spacing,
+            crossAxisSpacing: spacing,
+            childAspectRatio: childAspectRatio,
+          ),
+          itemCount: products.length,
+          itemBuilder: (_, i) {
+            final p = products[i];
+            final imageUrl = p['image']?.toString() ?? '';
+            final nama = p['nama']?.toString() ?? '';
+            final kode = p['kode']?.toString() ?? '';
+            final hpj = (p['hpj'] as num? ?? 0).toDouble();
+
+            final isProcessing = _processingKodes.contains(kode);
+
+            return GestureDetector(
+              onTap: isProcessing ? null : () => _insertProduk(kode),
+              child: Opacity(
+                opacity: isProcessing ? 0.55 : 1.0,
+                child: Card(
+                  elevation: 2,
+                  clipBehavior: Clip.antiAlias,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Stack(
                     children: [
-                      Expanded(
-                        child: CachedNetworkImage(
-                          imageUrl: imageUrl,
-                          fit: BoxFit.cover,
-                          // fadeIn agar transisi halus saat pertama load
-                          fadeInDuration: const Duration(milliseconds: 200),
-                          placeholder: (_, __) => Container(
-                            color: Colors.grey.shade100,
-                            child: const Center(
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
-                          errorWidget: (_, __, ___) => Container(
-                            color: Colors.grey.shade200,
-                            child: const Icon(
-                              Icons.broken_image,
-                              color: Colors.grey,
-                              size: 32,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 5,
-                        ),
-                        color: Colors.white,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              nama,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // ── Gambar square (1:1) ──
+                          AspectRatio(
+                            aspectRatio: 1,
+                            child: CachedNetworkImage(
+                              imageUrl: imageUrl,
+                              fit: BoxFit.cover,
+                              fadeInDuration: const Duration(milliseconds: 200),
+                              placeholder: (_, __) => Container(
+                                color: Colors.grey.shade100,
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              ),
+                              errorWidget: (_, __, ___) => Container(
+                                color: Colors.grey.shade200,
+                                child: const Icon(
+                                  Icons.broken_image,
+                                  color: Colors.grey,
+                                  size: 32,
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Rp ${CurrencyFormat.format(hpj)}',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFF1D273B),
-                                fontWeight: FontWeight.bold,
-                              ),
+                          ),
+                          Container(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: textVerticalPadding / 2,
                             ),
-                          ],
-                        ),
+                            color: Colors.white,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  nama,
+                                  maxLines: nameMaxLines,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: nameFontSize,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.25,
+                                  ),
+                                ),
+                                SizedBox(height: textGap),
+                                Text(
+                                  'Rp ${CurrencyFormat.format(hpj)}',
+                                  style: TextStyle(
+                                    fontSize: priceFontSize,
+                                    color: const Color(0xFF1D273B),
+                                    fontWeight: FontWeight.bold,
+                                    height: 1.25,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
+                      // Spinner overlay saat sedang diproses
+                      if (isProcessing)
+                        const Positioned.fill(
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Color(0xFF1D273B),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
-                  // Spinner overlay saat sedang diproses
-                  if (isProcessing)
-                    const Positioned.fill(
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Color(0xFF1D273B),
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -179,5 +238,4 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
   // ============================================================
   // CART LIST
   // ============================================================
-
 }

@@ -145,6 +145,7 @@ extension PenjualanProductsX on _PenjualanScreenState {
     if (res.data['success'] == true) {
       _checkVoucherValid(res.data);
       await _refreshFromApi();
+      _focusSku();
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -191,6 +192,7 @@ extension PenjualanProductsX on _PenjualanScreenState {
     if (res.data['success'] == true) {
       _checkVoucherValid(res.data);
       await _refreshFromApi();
+      _focusSku();
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

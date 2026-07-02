@@ -317,6 +317,9 @@ extension PenjualanPendingX on _PenjualanScreenState {
       // default dari dim_produk, mengabaikan harga salestipe (ShopeeFood, GrabFood, dll).
       await _loadItemsFromTemp(restoredNumber);
 
+      // Fokus ke SKU setelah retrieve agar scanner langsung bisa scan item berikutnya
+      _focusSku();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

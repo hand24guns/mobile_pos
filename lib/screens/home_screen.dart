@@ -389,7 +389,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Expanded(
                       child: _MenuTile(
                         icon: Icons.payments_rounded,
-                        label: 'CARA BAYAR',
+                        label: 'REKAP PEMBAYARAN',
                         description: 'Rekap omset per metode pembayaran',
                         compact: compact,
                         onTap: () => Navigator.push(
@@ -434,7 +434,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 SizedBox(height: gap),
                 _MenuTile(
                   icon: Icons.payments_rounded,
-                  label: 'CARA BAYAR',
+                  label: 'REKAP PEMBAYARAN',
                   description: 'Rekap omset per metode pembayaran hari ini',
                   compact: compact,
                   onTap: () => Navigator.push(

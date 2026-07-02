@@ -179,7 +179,6 @@ extension PenjualanDataX on _PenjualanScreenState {
       data: FormData.fromMap({
         'action': 'getNumber',
         'store_id': storeID,
-        'organisasi_id': organisasiID,
         'device_token': _deviceToken,
       }),
     );
@@ -417,5 +416,4 @@ extension PenjualanDataX on _PenjualanScreenState {
   // ============================================================
   // BUKA SHIFT
   // ============================================================
-
 }

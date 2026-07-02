@@ -14,8 +14,22 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
             if (mounted) _setState(() => _bodyHeight = availableHeight);
           });
         }
-        // Panel bawah (cart + summary) diberi 44% dari ruang yang tersedia
-        final bottomPanelHeight = availableHeight * 0.44;
+
+        // Panel bawah (cart + summary + tombol) diberi tinggi cukup untuk
+        // menampilkan cart minimal 2 item + summary + tombol, tanpa
+        // "mencuri" terlalu banyak ruang dari grid produk di atas.
+        //
+        // Rumus: gunakan sisa setelah grid diprioritaskan minimal 2 baris.
+        // - 1 baris grid ≈ (lebar panel / 4 kolom) + teks ~45dp
+        //   Pada portrait 7" (~600dp wide setelah right panel): cell ~130dp
+        // - 2 baris grid = ~260dp + tab bar ~40dp + header ~170dp = ~470dp
+        // - Sisa untuk bottom: availableHeight - 470, minimum 220dp
+        //   (cukup untuk 2 item cart + summary ringkas + tombol)
+        //
+        // Alternatif lebih simpel: clamp antara 200–280dp.
+        // 7" portrait body ~600dp → bottom 230dp → grid sisa 370dp → 2 baris
+        // 10" portrait body ~900dp → bottom 280dp → grid sisa 620dp → 4+ baris
+        final bottomPanelHeight = (availableHeight * 0.36).clamp(200.0, 280.0);
 
         return Column(
           children: [

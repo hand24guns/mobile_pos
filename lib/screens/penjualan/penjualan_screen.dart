@@ -44,6 +44,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   final _memberController = TextEditingController();
   final _nominalController = TextEditingController();
   final _keteranganController = TextEditingController(); // keterangan transaksi
+  // FocusNode untuk field SKU — dipakai oleh barcode scanner auto-focus
+  final _skuFocusNode = FocusNode();
   String _activeVoucher = '';
 
   // Track pending order yang sedang di-retrieve (null = transaksi baru)
@@ -88,7 +90,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   @override
   void initState() {
     super.initState();
-    _loadMinimalData();
+    _loadMinimalData().then((_) => _focusSku());
     _startShiftPolling();
   }
 
@@ -96,6 +98,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   void dispose() {
     _shiftPollingTimer?.cancel();
     _skuController.dispose();
+    _skuFocusNode.dispose();
     _memberController.dispose();
     _nominalController.dispose();
     _keteranganController.dispose();
@@ -108,6 +111,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // Wrapper agar extension di file part lain bisa panggil setState
   // tanpa kena warning invalid_use_of_protected_member.
   void _setState(VoidCallback fn) => setState(fn);
+
+  // Fokuskan kursor ke field SKU — dipanggil setelah insert produk,
+  // retrieve pending, reset transaksi, dsb. agar barcode scanner
+  // langsung bisa scan tanpa tap manual.
+  void _focusSku() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _skuFocusNode.requestFocus();
+    });
+  }
 
   // RESPONSIVE HELPERS
   // ============================================================
@@ -127,22 +139,28 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // Default 480 agar helpers tidak crash sebelum LayoutBuilder pertama kali build.
   double _bodyHeight = 480;
 
-  // Tiny: body < 420dp (7" landscape, 3-btn navbar → body ~390dp)
+  // Tiny: body < 500dp landscape (7" dengan 3-btn nav body ~390-530dp)
   bool get _isTinyTablet =>
-      _isLandscape ? _bodyHeight < 420 : _screenWidth < 600;
+      _isLandscape ? _bodyHeight < 500 : _screenWidth < 600;
 
-  // Small: body < 520dp (7–9" landscape, gesture nav → body ~440–480dp)
+  // Small: body < 620dp landscape (7–8" semua nav type)
   bool get _isSmallTablet =>
-      _isLandscape ? _bodyHeight < 520 : _screenWidth < 900;
+      _isLandscape ? _bodyHeight < 620 : _screenWidth < 900;
 
-  // Compact header: aktif di landscape kecil/sedang, termasuk 3-btn navbar
-  // Threshold 500 menangkap: 7" gesture (body ~440dp) DAN 7" 3-btn (body ~390dp)
-  // dan aman untuk 10" (body ~580dp+) yang tidak butuh compact mode.
-  bool get _isCompactHeader => _isLandscape && _bodyHeight < 500;
+  // Compact header: aktif di semua tablet 7" landscape (body ≤ 620dp),
+  // termasuk gesture nav (~560-600dp) DAN 3-button nav (~390-530dp).
+  // Threshold 620 aman untuk 8"+ (body ≥ 650dp) yang tidak perlu compact.
+  bool get _isCompactHeader => _isLandscape && _bodyHeight < 620;
+
+  // Tiny header (1 baris): aktif di 7" landscape semua nav type.
+  // Hanya store+channel+sku dalam 1 Row sehingga grid dapat ≥300dp
+  // ruang dan muat minimal 2 baris produk.
+  // Threshold 520 menangkap DPR=1 (body~472dp) dan DPR=1.5 (body~272dp).
+  bool get _isHeaderTiny => _isLandscape && _bodyHeight < 520;
 
   /// Lebar kolom kanan (cart + summary)
   double get _rightPanelWidth {
-    if (_isTinyTablet) return _screenWidth * 0.44;
+    if (_isTinyTablet) return _screenWidth * 0.42;
     if (_isSmallTablet) return _screenWidth * 0.40;
     return _screenWidth * 0.36;
   }
@@ -177,12 +195,8 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
           ? 38
           : 44;
 
-  /// Jumlah kolom pada grid gambar produk
-  int get _gridColumns {
-    if (_isTinyTablet) return 2;
-    if (_isSmallTablet) return 3;
-    return 4;
-  }
+  /// Jumlah kolom pada grid gambar produk — selalu 4 kolom
+  int get _gridColumns => 4;
 
   // ============================================================
   // BUILD
