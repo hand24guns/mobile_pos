@@ -331,8 +331,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Stat Cards — selalu 1 row ───────────────
-              _buildStatCards(compact: compact, gap: gap),
+              // ── Stat Cards ───────────────────────────────
+              _buildStatCards(compact: compact, gap: gap, w: w),
               SizedBox(height: compact ? 12 : 20),
 
               // ── Menu Utama label ────────────────────────
@@ -451,47 +451,77 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
-  // ── 3 Stat Cards — selalu 1 row ─────────────────────────
-  Widget _buildStatCards({required bool compact, required double gap}) {
+  // ── Stat Cards ───────────────────────────────────────────
+  // Tablet / layar lebar (w >= 600): 1 row, 3 card sejajar.
+  // HP / layar sempit  (w <  600): row 1 = 1 card besar (Total
+  // Penjualan), row 2 = 2 card kecil (Invoice Hari Ini & Status Printer).
+  Widget _buildStatCards(
+      {required bool compact, required double gap, required double w}) {
+    final totalPenjualanCard = _MiniStatCard(
+      icon: Icons.trending_up_rounded,
+      iconBg: const Color(0xFFF0FFF4),
+      iconColor: _green,
+      title: 'Total Penjualan',
+      value: _isLoading ? '...' : _formatRupiah(_totalPenjualan),
+      valueColor: _navy,
+      compact: compact,
+      loading: _isLoading,
+    );
+
+    final invoiceCard = _MiniStatCard(
+      icon: Icons.receipt_long_rounded,
+      iconBg: const Color(0xFFEFF6FF),
+      iconColor: _blue,
+      title: 'Invoice Hari Ini',
+      value: _isLoading ? '...' : '$_invoiceHariIni Invoice',
+      valueColor: _blue,
+      compact: compact,
+      loading: _isLoading,
+    );
+
+    final printerCard = _MiniStatCard(
+      icon: Icons.print_rounded,
+      iconBg: const Color(0xFFF5F3FF),
+      iconColor: const Color(0xFF7C3AED),
+      title: 'Status Printer',
+      value: _printerConnected ? 'Connected ●' : 'Disconnected ○',
+      valueColor: _printerConnected ? _green : Colors.red,
+      compact: compact,
+      loading: false,
+    );
+
+    if (w < 600) {
+      // ── Layar sempit (HP): 1 card besar + 2 card kecil ──
+      return Column(
+        children: [
+          _MiniStatCard(
+            icon: Icons.trending_up_rounded,
+            iconBg: const Color(0xFFF0FFF4),
+            iconColor: _green,
+            title: 'Total Penjualan',
+            value: _isLoading ? '...' : _formatRupiah(_totalPenjualan),
+            valueColor: _navy,
+            compact: compact,
+            loading: _isLoading,
+            large: true,
+          ),
+          SizedBox(height: gap),
+          Row(children: [
+            Expanded(child: invoiceCard),
+            SizedBox(width: gap),
+            Expanded(child: printerCard),
+          ]),
+        ],
+      );
+    }
+
+    // ── Layar lebar (tablet): 3 card sejajar 1 row ──
     return Row(children: [
-      Expanded(
-        child: _MiniStatCard(
-          icon: Icons.receipt_long_rounded,
-          iconBg: const Color(0xFFEFF6FF),
-          iconColor: _blue,
-          title: 'Invoice Hari Ini',
-          value: _isLoading ? '...' : '$_invoiceHariIni Invoice',
-          valueColor: _blue,
-          compact: compact,
-          loading: _isLoading,
-        ),
-      ),
+      Expanded(child: invoiceCard),
       SizedBox(width: gap),
-      Expanded(
-        child: _MiniStatCard(
-          icon: Icons.trending_up_rounded,
-          iconBg: const Color(0xFFF0FFF4),
-          iconColor: _green,
-          title: 'Total Penjualan',
-          value: _isLoading ? '...' : _formatRupiah(_totalPenjualan),
-          valueColor: _navy,
-          compact: compact,
-          loading: _isLoading,
-        ),
-      ),
+      Expanded(child: totalPenjualanCard),
       SizedBox(width: gap),
-      Expanded(
-        child: _MiniStatCard(
-          icon: Icons.print_rounded,
-          iconBg: const Color(0xFFF5F3FF),
-          iconColor: const Color(0xFF7C3AED),
-          title: 'Status Printer',
-          value: _printerConnected ? 'Connected ●' : 'Disconnected ○',
-          valueColor: _printerConnected ? _green : Colors.red,
-          compact: compact,
-          loading: false,
-        ),
-      ),
+      Expanded(child: printerCard),
     ]);
   }
 
@@ -606,6 +636,7 @@ class _MiniStatCard extends StatelessWidget {
   final Color valueColor;
   final bool compact;
   final bool loading;
+  final bool large;
 
   const _MiniStatCard({
     required this.icon,
@@ -616,12 +647,13 @@ class _MiniStatCard extends StatelessWidget {
     required this.valueColor,
     required this.compact,
     this.loading = false,
+    this.large = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final iconSize = compact ? 30.0 : 38.0;
-    final pad = compact ? 10.0 : 14.0;
+    final iconSize = large ? 46.0 : (compact ? 30.0 : 38.0);
+    final pad = large ? 16.0 : (compact ? 10.0 : 14.0);
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: pad, vertical: pad),
@@ -645,9 +677,10 @@ class _MiniStatCard extends StatelessWidget {
               color: iconBg,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, color: iconColor, size: compact ? 15 : 19),
+            child: Icon(icon,
+                color: iconColor, size: large ? 24 : (compact ? 15 : 19)),
           ),
-          SizedBox(width: compact ? 7 : 10),
+          SizedBox(width: large ? 14 : (compact ? 7 : 10)),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -657,16 +690,16 @@ class _MiniStatCard extends StatelessWidget {
                   title,
                   style: TextStyle(
                     color: Colors.grey[500],
-                    fontSize: compact ? 9 : 10,
+                    fontSize: large ? 12 : (compact ? 9 : 10),
                   ),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: large ? 4 : 2),
                 loading
                     ? Container(
-                        height: compact ? 11 : 14,
-                        width: 60,
+                        height: large ? 18 : (compact ? 11 : 14),
+                        width: large ? 100 : 60,
                         decoration: BoxDecoration(
                           color: Colors.grey[200],
                           borderRadius: BorderRadius.circular(4),
@@ -677,7 +710,7 @@ class _MiniStatCard extends StatelessWidget {
                         style: TextStyle(
                           color: valueColor,
                           fontWeight: FontWeight.bold,
-                          fontSize: compact ? 11 : 14,
+                          fontSize: large ? 20 : (compact ? 11 : 14),
                         ),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,

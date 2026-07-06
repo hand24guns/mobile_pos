@@ -320,12 +320,37 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
   }
 
   // ============================================================
+  // Label tombol — ganti jadi spinner kecil selama _isCartSyncing
+  // (mis. lagi recalculate channel / insert produk / apply voucher)
+  // supaya kasir tahu ini "lagi proses", bukan tombol yang error.
+  // ============================================================
+  Widget _actionButtonChild(String label, double fontSize) {
+    if (_isCartSyncing) {
+      return const SizedBox(
+        height: 16,
+        width: 16,
+        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+      );
+    }
+    return Text(
+      label,
+      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: fontSize),
+    );
+  }
+
+  // ============================================================
   // ACTION BUTTONS — PENDING + BAYAR (pinned fixed footer)
   // Compact mode: 2 tombol sejajar horizontal agar hemat tinggi.
+  //
+  // Kedua tombol ikut ter-disable selama _isCartSyncing (ada
+  // operasi cart yang masih berjalan — insert produk, update qty,
+  // ganti channel, voucher, dsb) supaya tidak simpan pending/bayar
+  // dengan harga yang belum sempat ter-update di server.
   // ============================================================
   Widget _buildActionButtons(PenjualanState state) {
     final compact = _isCompactHeader;
     final vPad = compact ? 6.0 : 8.0;
+    final canTap = state.items.isNotEmpty && !_isCartSyncing;
 
     return Container(
       color: Colors.white,
@@ -343,8 +368,7 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
                   child: SizedBox(
                     height: _buttonHeight,
                     child: ElevatedButton(
-                      onPressed:
-                          state.items.isEmpty ? null : _showPendingDialog,
+                      onPressed: canTap ? _showPendingDialog : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red,
                         shape: RoundedRectangleBorder(
@@ -352,14 +376,7 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
                         ),
                         padding: EdgeInsets.zero,
                       ),
-                      child: Text(
-                        'PENDING',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: _labelFontSize,
-                        ),
-                      ),
+                      child: _actionButtonChild('PENDING', _labelFontSize),
                     ),
                   ),
                 ),
@@ -368,7 +385,7 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
                   child: SizedBox(
                     height: _buttonHeight,
                     child: ElevatedButton(
-                      onPressed: state.items.isEmpty ? null : _prosesBayar,
+                      onPressed: canTap ? _prosesBayar : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF1D273B),
                         shape: RoundedRectangleBorder(
@@ -376,14 +393,7 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
                         ),
                         padding: EdgeInsets.zero,
                       ),
-                      child: Text(
-                        'BAYAR',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: _labelFontSize,
-                        ),
-                      ),
+                      child: _actionButtonChild('BAYAR', _labelFontSize),
                     ),
                   ),
                 ),
@@ -397,20 +407,14 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
                   width: double.infinity,
                   height: _buttonHeight,
                   child: ElevatedButton(
-                    onPressed: state.items.isEmpty ? null : _showPendingDialog,
+                    onPressed: canTap ? _showPendingDialog : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.red,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: Text(
-                      'PENDING PAYMENT',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: _actionButtonChild('PENDING PAYMENT', _labelFontSize),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -418,21 +422,14 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
                   width: double.infinity,
                   height: _buttonHeight,
                   child: ElevatedButton(
-                    onPressed: state.items.isEmpty ? null : _prosesBayar,
+                    onPressed: canTap ? _prosesBayar : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1D273B),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: Text(
-                      'BAYAR',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: _labelFontSize,
-                      ),
-                    ),
+                    child: _actionButtonChild('BAYAR', _labelFontSize),
                   ),
                 ),
               ],

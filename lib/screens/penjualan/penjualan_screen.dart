@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import '../../providers/penjualan_provider.dart';
@@ -46,6 +47,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   final _keteranganController = TextEditingController(); // keterangan transaksi
   // FocusNode untuk field SKU — dipakai oleh barcode scanner auto-focus
   final _skuFocusNode = FocusNode();
+
+  // Keyboard virtual hanya muncul saat user tap manual ke field SKU.
+  // Scanner fisik inject karakter langsung ke focused field tanpa butuh keyboard.
+  // Default false → _focusSku() memberi fokus tanpa membuka keyboard.
+  bool _skuKeyboardVisible = false;
   String _activeVoucher = '';
 
   // Track pending order yang sedang di-retrieve (null = transaksi baru)
@@ -62,6 +68,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   String _deviceToken = '';
   int _shiftID = 0;
   bool _isLoading = true;
+
+  // ── Guard: cegah simpan Pending / Bayar saat ada operasi yang
+  // sedang mengubah harga/temp_invoice (insert produk, update qty,
+  // hapus item, voucher, ganti channel). Mencegah race condition
+  // simpan pending dengan harga yang belum sempat ter-update di server
+  // (mis. ganti channel lalu langsung pencet Pending sebelum
+  // recalculateChannel selesai → harga lama yang ke-save).
+  bool _isCartSyncing = false;
 
   // ── Shift polling ─────────────────────────────────────────────
   Timer? _shiftPollingTimer;
@@ -112,13 +126,48 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // tanpa kena warning invalid_use_of_protected_member.
   void _setState(VoidCallback fn) => setState(fn);
 
-  // Fokuskan kursor ke field SKU — dipanggil setelah insert produk,
-  // retrieve pending, reset transaksi, dsb. agar barcode scanner
-  // langsung bisa scan tanpa tap manual.
+  // ============================================================
+  // GUARD CART MUTATION
+  // Bungkus semua operasi yang mengubah harga/temp_invoice (insert
+  // produk/package, update qty, hapus item, apply/remove voucher,
+  // ganti channel, recalc member) dengan flag _isCartSyncing.
+  // Selama flag ini true, tombol Pending & Bayar otomatis ter-disable
+  // (lihat widgets_summary.dart) — mencegah kasir menyimpan pending
+  // atau bayar dengan harga yang belum sempat ter-update di server.
+  //
+  // Dio sudah punya connectTimeout & receiveTimeout 10 detik
+  // (api_service.dart) jadi flag ini tidak akan gantung selamanya
+  // walau network mati total — worst case ±10 detik lalu ter-unlock
+  // otomatis via finally, walau request-nya gagal.
+  // ============================================================
+  Future<void> _runCartMutation(Future<void> Function() action) async {
+    if (_isCartSyncing) return; // sudah ada operasi lain berjalan, abaikan
+    if (mounted) _setState(() => _isCartSyncing = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) _setState(() => _isCartSyncing = false);
+    }
+  }
+
+  // Fokus ke field SKU TANPA membuka virtual keyboard.
+  // Dipakai setelah insert produk, retrieve pending, reset transaksi, dsb.
+  // Scanner fisik tidak butuh keyboard — inject langsung ke focused field.
   void _focusSku() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _skuFocusNode.requestFocus();
+      if (!mounted) return;
+      // Sembunyikan keyboard dulu kalau sedang terbuka
+      _setState(() => _skuKeyboardVisible = false);
+      _skuFocusNode.requestFocus();
+      // Pastikan keyboard benar-benar tersembunyi
+      SystemChannels.textInput.invokeMethod('TextInput.hide');
     });
+  }
+
+  // Fokus ke field SKU DAN buka keyboard — dipanggil saat user tap manual.
+  void _focusSkuWithKeyboard() {
+    _setState(() => _skuKeyboardVisible = true);
+    _skuFocusNode.requestFocus();
   }
 
   // RESPONSIVE HELPERS

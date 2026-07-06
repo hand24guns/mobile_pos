@@ -43,6 +43,25 @@ extension PenjualanProductsX on _PenjualanScreenState {
   // warning/notice sebelum JSON — bersihkan string lalu parse.
   // ============================================================
   Future<void> _insertProduk(String sku) async {
+    // ── Guard: masih ada operasi cart lain berjalan (ganti channel,
+    // insert produk lain, update qty, voucher, dsb). Kalau dibiarkan,
+    // dialog package tetap bisa kebuka & tampil harga yang benar, tapi
+    // begitu "Tambah ke Order" ditekan, _doInsertPackage/_runCartMutation
+    // akan diam-diam no-op karena _isCartSyncing masih true — dialog
+    // sudah kepencet Batal, kasir mengira sudah masuk padahal tidak.
+    // Makanya block dari sini, sebelum cekPackage / dialog dibuka sama sekali.
+    if (_isCartSyncing) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tunggu proses sebelumnya selesai...'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+      return;
+    }
     // ── Guard: abaikan tap jika kode ini sedang diproses ──
     if (_processingKodes.contains(sku)) return;
     if (mounted) _setState(() => _processingKodes.add(sku));
@@ -124,39 +143,41 @@ extension PenjualanProductsX on _PenjualanScreenState {
 
   /// Insert produk biasa ke temp_invoice
   Future<void> _doInsertProduk(String sku) async {
-    final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
+    await _runCartMutation(() async {
+      final state = ref.read(penjualanProvider);
+      final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'insertItem',
-        'number': state.number,
-        'sku': sku,
-        'organisasi_id': state.organisasiID,
-        'store_id': state.storeID,
-        'member_id': state.memberID ?? 0,
-        'voucher': _activeVoucher,
-        'device_token': _deviceToken,
-        'salestipe_id': state.salesTipeID,
-      }),
-    );
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'insertItem',
+          'number': state.number,
+          'sku': sku,
+          'organisasi_id': state.organisasiID,
+          'store_id': state.storeID,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'device_token': _deviceToken,
+          'salestipe_id': state.salesTipeID,
+        }),
+      );
 
-    if (res.data['success'] == true) {
-      _checkVoucherValid(res.data);
-      await _refreshFromApi();
-      _focusSku();
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(res.data['message'] ?? 'Gagal menambahkan produk'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      if (res.data['success'] == true) {
+        _checkVoucherValid(res.data);
+        await _refreshFromApi();
+        _focusSku();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(res.data['message'] ?? 'Gagal menambahkan produk'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
-    }
-    _skuController.clear();
+      _skuController.clear();
+    });
   }
 
   /// Insert produk package ke temp_invoice
@@ -167,44 +188,46 @@ extension PenjualanProductsX on _PenjualanScreenState {
     required double addonTotal,
     String keterangan = '',
   }) async {
-    final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
+    await _runCartMutation(() async {
+      final state = ref.read(penjualanProvider);
+      final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'insertPackage',
-        'number': state.number,
-        'sku': sku,
-        'organisasi_id': state.organisasiID,
-        'store_id': state.storeID,
-        'member_id': state.memberID ?? 0,
-        'voucher': _activeVoucher,
-        'device_token': _deviceToken,
-        'isian': jsonEncode(isianDipilih),
-        'addon': jsonEncode(addonDipilih),
-        'addon_harga': addonTotal,
-        'keterangan': keterangan,
-        'salestipe_id': state.salesTipeID,
-      }),
-    );
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'insertPackage',
+          'number': state.number,
+          'sku': sku,
+          'organisasi_id': state.organisasiID,
+          'store_id': state.storeID,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'device_token': _deviceToken,
+          'isian': jsonEncode(isianDipilih),
+          'addon': jsonEncode(addonDipilih),
+          'addon_harga': addonTotal,
+          'keterangan': keterangan,
+          'salestipe_id': state.salesTipeID,
+        }),
+      );
 
-    if (res.data['success'] == true) {
-      _checkVoucherValid(res.data);
-      await _refreshFromApi();
-      _focusSku();
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              res.data['message'] ?? 'Gagal menambahkan produk package',
+      if (res.data['success'] == true) {
+        _checkVoucherValid(res.data);
+        await _refreshFromApi();
+        _focusSku();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                res.data['message'] ?? 'Gagal menambahkan produk package',
+              ),
+              backgroundColor: Colors.red,
             ),
-            backgroundColor: Colors.red,
-          ),
-        );
+          );
+        }
       }
-    }
+    });
   }
 
   // ============================================================

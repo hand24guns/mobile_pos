@@ -136,7 +136,11 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
             final kode = p['kode']?.toString() ?? '';
             final hpj = (p['hpj'] as num? ?? 0).toDouble();
 
-            final isProcessing = _processingKodes.contains(kode);
+            // isProcessing: kode ini sendiri lagi diproses, ATAU ada
+            // operasi cart lain (ganti channel/insert/qty/voucher) yang
+            // masih berjalan — lihat guard _isCartSyncing di _insertProduk.
+            final isProcessing =
+                _processingKodes.contains(kode) || _isCartSyncing;
 
             return GestureDetector(
               onTap: isProcessing ? null : () => _insertProduk(kode),
