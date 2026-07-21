@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../services/api_service.dart';
 import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -55,6 +56,116 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Pengaturan Base URL (multi-domain)
+  // ---------------------------------------------------------------------
+
+  Future<void> _showBaseUrlDialog() async {
+    final controller = TextEditingController(
+      text: ApiService.isCustomBaseUrl ? ApiService.baseUrl : '',
+    );
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0F1F45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: const Text(
+                'Pengaturan Server',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Default: ${ApiService.defaultBaseUrl}',
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.black87),
+                    keyboardType: TextInputType.url,
+                    decoration: InputDecoration(
+                      hintText: 'https://domain-anda.com/api',
+                      hintStyle: const TextStyle(color: Colors.grey),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Kosongkan lalu tekan Simpan untuk kembali ke default.',
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Batal'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final oldUrl = ApiService.baseUrl;
+                    await ApiService.setBaseUrl(null);
+                    if (mounted) {
+                      Navigator.pop(dialogContext);
+                      _showSnack(
+                        ApiService.baseUrl != oldUrl
+                            ? 'URL server direset ke default. Sesi lama direset.'
+                            : 'URL server direset ke default',
+                      );
+                    }
+                  },
+                  child: const Text('Reset'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final oldUrl = ApiService.baseUrl;
+                    final value = controller.text.trim();
+                    await ApiService.setBaseUrl(
+                      value.isEmpty ? null : value,
+                    );
+                    if (mounted) {
+                      Navigator.pop(dialogContext);
+                      _showSnack(
+                        ApiService.baseUrl != oldUrl
+                            ? 'URL server disimpan: ${ApiService.baseUrl}. Sesi lama direset.'
+                            : 'URL server disimpan: ${ApiService.baseUrl}',
+                      );
+                    }
+                  },
+                  child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
@@ -129,6 +240,17 @@ class _LoginScreenState extends State<LoginScreen> {
               },
             ),
           ),
+          // Ikon setting base URL — pojok kanan atas, di atas SafeArea
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: IconButton(
+                icon: const Icon(Icons.settings_ethernet, color: Colors.white54),
+                tooltip: 'Pengaturan Server',
+                onPressed: _showBaseUrlDialog,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -171,7 +293,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'v1.1.0',
+                    'v1.1.5',
                     style: TextStyle(
                       color: Colors.white54,
                       fontSize: 13,
@@ -218,7 +340,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'v1.1.0',
+                'v1.1.5',
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 14,

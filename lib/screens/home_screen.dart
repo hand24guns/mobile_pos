@@ -9,6 +9,7 @@ import 'invoice_list_screen.dart';
 import 'laporan_pembayaran_screen.dart';
 import 'login_screen.dart';
 import 'printer_screen.dart';
+import 'adjustment_screen.dart';
 
 // ─── Palette ────────────────────────────────────────────────
 const Color _navy = Color(0xFF0D1B3E);
@@ -38,6 +39,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final bool _printerConnected = false;
   bool _isLoading = false;
   List<int> _outlets = [];
+  List<String> _menus = [];
+  bool _sessionLoaded = false;
+
+  // Path menu di m_menu_pos yang mewakili fitur Penyesuaian (sama
+  // dengan path yang dipakai sidebar.php versi web).
+  static const String _menuPathAdjustment = 'penyesuaian/Adjustment';
 
   @override
   void initState() {
@@ -52,8 +59,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _nama = session['nama'] ?? '';
       _username = session['username'] ?? '';
       _outlets = List<int>.from(session['outlets'] ?? []);
+      _menus = List<String>.from(session['menus'] ?? []);
+      _sessionLoaded = true;
     });
     _loadStats();
+  }
+
+  // User tanpa akses store (belum terdaftar di m_user_divisi) tidak
+  // boleh masuk ke Penjualan/Penyesuaian — form-nya akan kosong/rusak
+  // karena tidak ada store yang bisa dipilih. Sebelum session selesai
+  // di-load, anggap dulu enabled (hindari tile kelihatan disabled
+  // sekilas lalu berubah begitu data outlet datang).
+  bool get _hasStoreAccess => !_sessionLoaded || _outlets.isNotEmpty;
+
+  // Penyesuaian butuh DUA syarat: akses store (sama seperti Penjualan)
+  // DAN akses menu "Penyesuaian" dari grup user (m_user_grup ->
+  // m_grup_menu -> m_menu_pos), sama seperti yang dicek sidebar.php
+  // di versi web.
+  bool get _hasAdjustmentAccess =>
+      !_sessionLoaded || (_outlets.isNotEmpty && _menus.contains(_menuPathAdjustment));
+
+  void _showNoStoreAccessWarning() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: const Icon(Icons.lock_outline_rounded, color: _navy, size: 32),
+        title: const Text('Tidak Ada Akses Store'),
+        content: const Text(
+          'Akun kamu belum memiliki akses ke store manapun. Silakan hubungi admin untuk mendapatkan akses.',
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(backgroundColor: _navy),
+            child: const Text('OK', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showNoAdjustmentAccessWarning() {
+    final reason = _outlets.isEmpty
+        ? 'Akun kamu belum memiliki akses ke store manapun.'
+        : 'Akun kamu tidak memiliki izin akses menu Penyesuaian.';
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: const Icon(Icons.lock_outline_rounded, color: _navy, size: 32),
+        title: const Text('Tidak Ada Akses'),
+        content: Text('$reason Silakan hubungi admin untuk mendapatkan akses.'),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(backgroundColor: _navy),
+            child: const Text('OK', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadStats() async {
@@ -355,94 +422,80 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               SizedBox(height: compact ? 10 : 14),
 
               // ── Menu Tiles ──────────────────────────────
-              // Landscape / tablet (w >= 600): 1 row, 3 card
-              // Portrait / phone  (w <  600): 2 row — PENJUALAN+INVOICE atas, CARA BAYAR bawah
-              if (w >= 600) ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.shopping_cart_rounded,
-                        label: 'PENJUALAN',
-                        description: 'Kasir & transaksi penjualan produk',
-                        compact: compact,
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const PenjualanScreen())),
-                      ),
+              // Selalu 2 baris x 2 kolom, baik landscape/tablet maupun
+              // portrait/phone: baris atas PENJUALAN + INVOICE,
+              // baris bawah PENYESUAIAN STOK + REKAP PEMBAYARAN.
+              //
+              // PENJUALAN & PENYESUAIAN STOK butuh akses store
+              // (m_user_divisi) — kalau user tidak punya outlet sama
+              // sekali, tile-nya di-disable (abu-abu) dan tap
+              // menampilkan warning, bukan masuk ke form kosong/rusak.
+              Row(
+                children: [
+                  Expanded(
+                    child: _MenuTile(
+                      icon: Icons.shopping_cart_rounded,
+                      label: 'PENJUALAN',
+                      description: 'Kasir & transaksi penjualan produk',
+                      compact: compact,
+                      enabled: _hasStoreAccess,
+                      onTap: _hasStoreAccess
+                          ? () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const PenjualanScreen()))
+                          : _showNoStoreAccessWarning,
                     ),
-                    SizedBox(width: gap),
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.description_rounded,
-                        label: 'INVOICE',
-                        description: 'Riwayat transaksi & cetak ulang invoice',
-                        compact: compact,
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const InvoiceListScreen())),
-                      ),
+                  ),
+                  SizedBox(width: gap),
+                  Expanded(
+                    child: _MenuTile(
+                      icon: Icons.description_rounded,
+                      label: 'INVOICE',
+                      description: 'Riwayat transaksi & cetak ulang invoice',
+                      compact: compact,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const InvoiceListScreen())),
                     ),
-                    SizedBox(width: gap),
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.payments_rounded,
-                        label: 'REKAP PEMBAYARAN',
-                        description: 'Rekap omset per metode pembayaran',
-                        compact: compact,
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    const LaporanPembayaranScreen())),
-                      ),
+                  ),
+                ],
+              ),
+              SizedBox(height: gap),
+              Row(
+                children: [
+                  Expanded(
+                    child: _MenuTile(
+                      icon: Icons.inventory_2_rounded,
+                      label: 'PENYESUAIAN STOK',
+                      description: 'Update selisih & set total stok produk',
+                      compact: compact,
+                      enabled: _hasAdjustmentAccess,
+                      onTap: _hasAdjustmentAccess
+                          ? () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const AdjustmentScreen()))
+                          : _showNoAdjustmentAccessWarning,
                     ),
-                  ],
-                ),
-              ] else ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.shopping_cart_rounded,
-                        label: 'PENJUALAN',
-                        description: 'Kasir & transaksi penjualan produk',
-                        compact: compact,
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const PenjualanScreen())),
-                      ),
+                  ),
+                  SizedBox(width: gap),
+                  Expanded(
+                    child: _MenuTile(
+                      icon: Icons.payments_rounded,
+                      label: 'REKAP PEMBAYARAN',
+                      description: 'Rekap omset per metode pembayaran',
+                      compact: compact,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const LaporanPembayaranScreen())),
                     ),
-                    SizedBox(width: gap),
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.description_rounded,
-                        label: 'INVOICE',
-                        description: 'Riwayat transaksi & cetak ulang invoice',
-                        compact: compact,
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const InvoiceListScreen())),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: gap),
-                _MenuTile(
-                  icon: Icons.payments_rounded,
-                  label: 'REKAP PEMBAYARAN',
-                  description: 'Rekap omset per metode pembayaran hari ini',
-                  compact: compact,
-                  onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const LaporanPembayaranScreen())),
-                ),
-              ],
+                  ),
+                ],
+              ),
               SizedBox(height: compact ? 8 : 20),
             ],
           ),
@@ -733,6 +786,7 @@ class _MenuTile extends StatelessWidget {
   final String description;
   final bool compact;
   final VoidCallback onTap;
+  final bool enabled;
 
   const _MenuTile({
     required this.icon,
@@ -740,6 +794,7 @@ class _MenuTile extends StatelessWidget {
     required this.description,
     required this.compact,
     required this.onTap,
+    this.enabled = true,
   });
 
   @override
@@ -755,15 +810,21 @@ class _MenuTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: Ink(
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [_navy, _navyMid, Color(0xFF1E3A8A)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            gradient: enabled
+                ? const LinearGradient(
+                    colors: [_navy, _navyMid, Color(0xFF1E3A8A)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : LinearGradient(
+                    colors: [Colors.grey.shade500, Colors.grey.shade600],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: _navy.withOpacity(0.3),
+                color: (enabled ? _navy : Colors.grey).withOpacity(0.3),
                 blurRadius: 10,
                 offset: const Offset(0, 3),
               ),
@@ -798,8 +859,11 @@ class _MenuTile extends StatelessWidget {
                         color: Colors.white.withOpacity(0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.arrow_forward_ios_rounded,
-                          color: Colors.white, size: 12),
+                      child: Icon(
+                        enabled ? Icons.arrow_forward_ios_rounded : Icons.lock_outline_rounded,
+                        color: Colors.white,
+                        size: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -834,14 +898,14 @@ class _MenuTile extends StatelessWidget {
                     vertical: compact ? 6 : 8,
                   ),
                   decoration: BoxDecoration(
-                    color: _blue,
+                    color: enabled ? _blue : Colors.white.withOpacity(0.25),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Buka Sekarang',
+                        enabled ? 'Buka Sekarang' : 'Tidak Ada Akses',
                         style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -849,8 +913,11 @@ class _MenuTile extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      const Icon(Icons.arrow_forward_rounded,
-                          color: Colors.white, size: 11),
+                      Icon(
+                        enabled ? Icons.arrow_forward_rounded : Icons.lock_outline_rounded,
+                        color: Colors.white,
+                        size: 11,
+                      ),
                     ],
                   ),
                 ),

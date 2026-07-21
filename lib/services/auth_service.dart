@@ -28,6 +28,10 @@ class AuthService {
           (data['outlets'] as List? ?? []).map((e) => int.tryParse(e.toString()) ?? 0)
         ).where((e) => e > 0).toList();
 
+        final menus = List<String>.from(
+          (data['menus'] as List? ?? []).map((e) => e.toString())
+        );
+
         await SessionService.saveSession(
           token:    data['token']    as String,
           userID:   data['user_id'] is int
@@ -36,6 +40,7 @@ class AuthService {
           nama:     data['nama']     as String? ?? '',
           username: data['username'] as String? ?? '',
           outlets:  outlets,
+          menus:    menus,
         );
       }
 

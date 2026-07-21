@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -7,6 +8,7 @@ class SessionService {
   static const String _keyNama        = 'nama';
   static const String _keyUsername    = 'username';
   static const String _keyOutlets     = 'outlets'; // CSV: "1,2,3"
+  static const String _keyMenus       = 'menus';   // JSON array of menu path, e.g. ["penyesuaian/Adjustment"]
   static const String _keyDeviceToken = 'device_token';
 
   // ============================================================
@@ -34,6 +36,7 @@ class SessionService {
     required String nama,
     required String username,
     required List<int> outlets,
+    List<String> menus = const [],
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyToken,    token);
@@ -41,6 +44,7 @@ class SessionService {
     await prefs.setString(_keyNama,     nama);
     await prefs.setString(_keyUsername, username);
     await prefs.setString(_keyOutlets,  outlets.join(','));
+    await prefs.setString(_keyMenus,    jsonEncode(menus));
   }
 
   // ============================================================
@@ -55,6 +59,7 @@ class SessionService {
       'nama':     prefs.getString(_keyNama)     ?? '',
       'username': prefs.getString(_keyUsername) ?? '',
       'outlets':  _parseOutlets(raw),
+      'menus':    _parseMenus(prefs.getString(_keyMenus) ?? ''),
     };
   }
 
@@ -89,6 +94,7 @@ class SessionService {
     await prefs.remove(_keyNama);
     await prefs.remove(_keyUsername);
     await prefs.remove(_keyOutlets);
+    await prefs.remove(_keyMenus);
   }
 
   // ── Helper private ─────────────────────────────────────────
@@ -99,5 +105,14 @@ class SessionService {
         .map((e) => int.tryParse(e.trim()) ?? 0)
         .where((e) => e > 0)
         .toList();
+  }
+
+  static List<String> _parseMenus(String raw) {
+    if (raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) return decoded.map((e) => e.toString()).toList();
+    } catch (_) {}
+    return [];
   }
 }

@@ -20,6 +20,7 @@ import '../invoice_list_screen.dart';
 import '../../widgets/package_dialog.dart';
 import '../../widgets/add_member_sheet.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 // ── File ini dipecah ke beberapa part untuk maintenance ──
 part 'shift.dart';

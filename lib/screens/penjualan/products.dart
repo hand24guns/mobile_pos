@@ -1,7 +1,29 @@
 // AUTO-SPLIT FROM penjualan_screen.dart — bagian: Search/insert produk, package, voucher check internal, refresh, image grid loader, product picker.
 // Berisi method/widget yang dipindah ke extension agar file utama lebih ringkas.
 // Behavior identik dengan versi monolitik sebelumnya.
+//
+// CATATAN: butuh package flutter_cache_manager di pubspec.yaml
+// (sudah ditambahkan) dan import di penjualan_screen.dart (file utama):
+//   import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 part of 'penjualan_screen.dart';
+
+// ============================================================
+// CACHE MANAGER KHUSUS GAMBAR PRODUK
+// Dipisah dari default cache manager cached_network_image supaya:
+// - Gambar produk tidak ikut ke-evict bareng cache lain di app
+// - stalePeriod jelas: gambar dianggap "boleh dipakai apa adanya"
+//   selama 7 hari sebelum dicoba re-fetch di background (tetap tampil
+//   dari cache dulu selama re-fetch, tidak blocking UI)
+// - maxNrOfCacheObjects dibatasi supaya tidak membengkak tanpa batas
+//   di tablet dengan storage terbatas
+// ============================================================
+final CacheManager productImageCacheManager = CacheManager(
+  Config(
+    'productImageCache',
+    stalePeriod: const Duration(days: 7),
+    maxNrOfCacheObjects: 300,
+  ),
+);
 
 extension PenjualanProductsX on _PenjualanScreenState {
   Future<void> _searchProduk(String sku) async {
@@ -299,15 +321,17 @@ extension PenjualanProductsX on _PenjualanScreenState {
       final state = ref.read(penjualanProvider);
       final dio = ApiService.getDio(token: _token);
 
-      final rawRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getImageProducts',
-          'organisasi_id': state.organisasiID,
-          'salestipe_id': state.salesTipeID,
-        }),
-        options: Options(responseType: ResponseType.plain),
-      );
+      final rawRes = await dio
+          .post(
+            '/penjualan.php',
+            data: FormData.fromMap({
+              'action': 'getImageProducts',
+              'organisasi_id': state.organisasiID,
+              'salestipe_id': state.salesTipeID,
+            }),
+            options: Options(responseType: ResponseType.plain),
+          )
+          .timeout(const Duration(seconds: 12));
 
       final rawStr = rawRes.data?.toString() ?? '';
 
@@ -355,14 +379,55 @@ extension PenjualanProductsX on _PenjualanScreenState {
 
   /// Pre-warm: decode gambar ke memory di background setelah grid dimuat,
   /// agar saat pertama kali tab dibuka sudah siap render.
-  void _prewarmImageCache() {
+  ///
+  /// PENTING (kondisi sinyal 4G/tethering naik-turun):
+  /// - Request gambar ditembak dalam BATCH kecil (bukan semua sekaligus),
+  ///   supaya tidak membanjiri koneksi yang sedang lemah dengan puluhan/
+  ///   ratusan request paralel yang ujung-ujungnya sama-sama timeout.
+  /// - Setiap gambar punya timeout sendiri dan error-nya diisolasi per-item
+  ///   — satu gambar gagal tidak boleh menghentikan gambar lain di batch
+  ///   yang sama maupun batch berikutnya.
+  /// - Pakai productImageCacheManager (bukan default global cache manager)
+  ///   supaya kebijakan cache gambar produk (stalePeriod, max object)
+  ///   konsisten dan tidak tercampur cache lain di app.
+  Future<void> _prewarmImageCache() async {
+    final urls = <String>[];
     for (final cat in _imageCategories) {
       for (final p in (cat['produk'] as List<Map<String, dynamic>>)) {
         final url = p['image']?.toString() ?? '';
-        if (url.isNotEmpty) {
-          precacheImage(CachedNetworkImageProvider(url), context);
-        }
+        if (url.isNotEmpty) urls.add(url);
       }
+    }
+    if (urls.isEmpty) return;
+
+    // Batch kecil (4 paralel) — cukup untuk memanfaatkan koneksi tanpa
+    // membanjiri saat sinyal sedang lemah. Kalau nanti dirasa masih berat
+    // di tethering, turunkan ke 2-3.
+    const batchSize = 4;
+    const perImageTimeout = Duration(seconds: 8);
+
+    for (var i = 0; i < urls.length; i += batchSize) {
+      if (!mounted) return; // user sudah pindah screen, hentikan prewarm
+
+      final batch = urls.skip(i).take(batchSize);
+      await Future.wait(
+        batch.map((url) async {
+          try {
+            await precacheImage(
+              CachedNetworkImageProvider(
+                url,
+                cacheManager: productImageCacheManager,
+              ),
+              context,
+            ).timeout(perImageTimeout);
+          } catch (e) {
+            // Sengaja diam — gambar ini akan dicoba ulang otomatis oleh
+            // CachedNetworkImage widget di grid saat benar-benar dirender
+            // (lihat errorWidget dengan tombol retry di widgets_grid.dart).
+            debugPrint('[prewarmImageCache] gagal muat: $url ($e)');
+          }
+        }),
+      );
     }
   }
 

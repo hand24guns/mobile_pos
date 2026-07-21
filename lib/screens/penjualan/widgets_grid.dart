@@ -3,6 +3,78 @@
 // Behavior identik dengan versi monolitik sebelumnya.
 part of 'penjualan_screen.dart';
 
+// ============================================================
+// TILE GAMBAR PRODUK — pakai productImageCacheManager + auto-retry.
+//
+// Kenapa auto-retry, bukan tombol tap-untuk-retry:
+// Seluruh card produk (termasuk area gambar ini) sudah jadi target tap
+// untuk "tambah ke keranjang" (lihat GestureDetector di _buildProductGrid).
+// Menaruh tap target kedua di atas gambar yang error beresiko dua gesture
+// bertumpuk saling trigger — kasir niat retry gambar malah ke-insert
+// produk ke cart. Jadi retry dilakukan otomatis di background dengan
+// backoff, dibatasi maksimal percobaan, supaya tidak jadi retry-storm
+// saat sinyal memang sedang mati total.
+// ============================================================
+class _ProductImageTile extends StatefulWidget {
+  final String imageUrl;
+  const _ProductImageTile({required this.imageUrl});
+
+  @override
+  State<_ProductImageTile> createState() => _ProductImageTileState();
+}
+
+class _ProductImageTileState extends State<_ProductImageTile> {
+  int _attempt = 0;
+  static const int _maxAutoRetry = 2;
+
+  void _scheduleRetry() {
+    if (_attempt >= _maxAutoRetry) return;
+    // Backoff naik tiap percobaan (2s, 4s) — beri jeda agar tidak
+    // langsung nembak ulang saat koneksi masih drop.
+    Future.delayed(Duration(seconds: 2 * (_attempt + 1)), () {
+      if (!mounted) return;
+      // Buang entry gagal dari cache manager supaya percobaan berikutnya
+      // benar-benar fetch ulang ke server, bukan mengembalikan error yang sama.
+      productImageCacheManager.removeFile(widget.imageUrl);
+      setState(() => _attempt++);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CachedNetworkImage(
+      // Key berubah tiap percobaan → widget dianggap baru oleh Flutter,
+      // memaksa CachedNetworkImage benar-benar resolve ulang, bukan
+      // mempertahankan state error dari attempt sebelumnya.
+      key: ValueKey('${widget.imageUrl}_$_attempt'),
+      imageUrl: widget.imageUrl,
+      cacheManager: productImageCacheManager,
+      fit: BoxFit.cover,
+      fadeInDuration: const Duration(milliseconds: 200),
+      placeholder: (_, __) => Container(
+        color: Colors.grey.shade100,
+        child: const Center(
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      errorWidget: (_, __, ___) {
+        // Dipanggil tiap kali build gagal — jadwalkan retry (kalau masih
+        // dalam batas percobaan) tanpa memblokir proses build itu sendiri.
+        _scheduleRetry();
+        final stillTrying = _attempt < _maxAutoRetry;
+        return Container(
+          color: Colors.grey.shade200,
+          child: Icon(
+            stillTrying ? Icons.wifi_off_rounded : Icons.broken_image,
+            color: Colors.grey,
+            size: 28,
+          ),
+        );
+      },
+    );
+  }
+}
+
 extension PenjualanGridWidgetsX on _PenjualanScreenState {
   Widget _buildImageGrid() {
     if (_isLoadingImages) {
@@ -161,27 +233,7 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
                           // ── Gambar square (1:1) ──
                           AspectRatio(
                             aspectRatio: 1,
-                            child: CachedNetworkImage(
-                              imageUrl: imageUrl,
-                              fit: BoxFit.cover,
-                              fadeInDuration: const Duration(milliseconds: 200),
-                              placeholder: (_, __) => Container(
-                                color: Colors.grey.shade100,
-                                child: const Center(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                              ),
-                              errorWidget: (_, __, ___) => Container(
-                                color: Colors.grey.shade200,
-                                child: const Icon(
-                                  Icons.broken_image,
-                                  color: Colors.grey,
-                                  size: 32,
-                                ),
-                              ),
-                            ),
+                            child: _ProductImageTile(imageUrl: imageUrl),
                           ),
                           Container(
                             padding: EdgeInsets.symmetric(
