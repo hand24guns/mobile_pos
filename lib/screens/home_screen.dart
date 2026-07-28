@@ -10,6 +10,8 @@ import 'laporan_pembayaran_screen.dart';
 import 'login_screen.dart';
 import 'printer_screen.dart';
 import 'adjustment_screen.dart';
+import 'laporan_screen.dart';
+import 'pengaturan_screen.dart';
 
 // ─── Palette ────────────────────────────────────────────────
 const Color _navy = Color(0xFF0D1B3E);
@@ -77,7 +79,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // m_grup_menu -> m_menu_pos), sama seperti yang dicek sidebar.php
   // di versi web.
   bool get _hasAdjustmentAccess =>
-      !_sessionLoaded || (_outlets.isNotEmpty && _menus.contains(_menuPathAdjustment));
+      !_sessionLoaded ||
+      (_outlets.isNotEmpty && _menus.contains(_menuPathAdjustment));
 
   void _showNoStoreAccessWarning() {
     showDialog(
@@ -138,10 +141,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: {
-          'action': 'getDashboard',
-          'store_ids': _outlets.join(','),
-        },
+        body: {'action': 'getDashboard', 'store_ids': _outlets.join(',')},
       ).timeout(const Duration(seconds: 10));
 
       if (!mounted) return;
@@ -202,15 +202,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildBody() {
     switch (_navIndex) {
       case 1:
-        return const Center(
-            child: Text('Laporan\n(Coming soon)',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 18, color: Colors.grey)));
+        return LaporanScreen(outlets: _outlets);
       case 2:
-        return const Center(
-            child: Text('Pengaturan\n(Coming soon)',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 18, color: Colors.grey)));
+        return PengaturanScreen(outlets: _outlets);
       default:
         return _buildHomeContent();
     }
@@ -263,7 +257,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   color: Colors.white.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                      color: Colors.white.withOpacity(0.3), width: 1.5),
+                    color: Colors.white.withOpacity(0.3),
+                    width: 1.5,
+                  ),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: Image.asset(
@@ -317,12 +313,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: _blueLight.withOpacity(0.35),
                             borderRadius: BorderRadius.circular(20),
-                            border:
-                                Border.all(color: _blueLight.withOpacity(0.5)),
+                            border: Border.all(
+                              color: _blueLight.withOpacity(0.5),
+                            ),
                           ),
                           child: Text(
                             'Mobile',
@@ -339,8 +338,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(height: 2),
                       Row(
                         children: [
-                          const Icon(Icons.person_outline,
-                              color: Colors.white54, size: 13),
+                          const Icon(
+                            Icons.person_outline,
+                            color: Colors.white54,
+                            size: 13,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             'User: $_username',
@@ -359,8 +361,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               _HeaderIconBtn(
                 icon: Icons.print_rounded,
                 label: 'Printer',
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const PrinterScreen())),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PrinterScreen()),
+                ),
                 isTablet: isTablet,
               ),
               const SizedBox(width: 8),
@@ -381,135 +385,152 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // HOME CONTENT
   // ============================================================
   Widget _buildHomeContent() {
-    return LayoutBuilder(builder: (context, constraints) {
-      final w = constraints.maxWidth;
-      final h = constraints.maxHeight;
-      final compact = h < 480;
-      final hPad = w >= 800 ? 28.0 : 16.0;
-      final vPad = compact ? 12.0 : 20.0;
-      final gap = compact ? 10.0 : 16.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final h = constraints.maxHeight;
+        final compact = h < 480;
+        final hPad = w >= 800 ? 28.0 : 16.0;
+        final vPad = compact ? 12.0 : 20.0;
+        final gap = compact ? 10.0 : 16.0;
 
-      return RefreshIndicator(
-        color: _blue,
-        onRefresh: _loadStats,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Stat Cards ───────────────────────────────
-              _buildStatCards(compact: compact, gap: gap, w: w),
-              SizedBox(height: compact ? 12 : 20),
+        return RefreshIndicator(
+          color: _blue,
+          onRefresh: _loadStats,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Stat Cards ───────────────────────────────
+                _buildStatCards(compact: compact, gap: gap, w: w),
+                SizedBox(height: compact ? 12 : 20),
 
-              // ── Menu Utama label ────────────────────────
-              Row(children: [
-                Text(
-                  'Menu Utama',
-                  style: TextStyle(
-                    color: _navy,
-                    fontWeight: FontWeight.bold,
-                    fontSize: compact ? 13 : 16,
-                  ),
+                // ── Menu Utama label ────────────────────────
+                Row(
+                  children: [
+                    Text(
+                      'Menu Utama',
+                      style: TextStyle(
+                        color: _navy,
+                        fontWeight: FontWeight.bold,
+                        fontSize: compact ? 13 : 16,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 28,
+                      height: 3,
+                      decoration: BoxDecoration(
+                        color: _blue,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Container(
-                    width: 28,
-                    height: 3,
-                    decoration: BoxDecoration(
-                        color: _blue, borderRadius: BorderRadius.circular(2))),
-              ]),
-              SizedBox(height: compact ? 10 : 14),
+                SizedBox(height: compact ? 10 : 14),
 
-              // ── Menu Tiles ──────────────────────────────
-              // Selalu 2 baris x 2 kolom, baik landscape/tablet maupun
-              // portrait/phone: baris atas PENJUALAN + INVOICE,
-              // baris bawah PENYESUAIAN STOK + REKAP PEMBAYARAN.
-              //
-              // PENJUALAN & PENYESUAIAN STOK butuh akses store
-              // (m_user_divisi) — kalau user tidak punya outlet sama
-              // sekali, tile-nya di-disable (abu-abu) dan tap
-              // menampilkan warning, bukan masuk ke form kosong/rusak.
-              Row(
-                children: [
-                  Expanded(
-                    child: _MenuTile(
-                      icon: Icons.shopping_cart_rounded,
-                      label: 'PENJUALAN',
-                      description: 'Kasir & transaksi penjualan produk',
-                      compact: compact,
-                      enabled: _hasStoreAccess,
-                      onTap: _hasStoreAccess
-                          ? () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const PenjualanScreen()))
-                          : _showNoStoreAccessWarning,
+                // ── Menu Tiles ──────────────────────────────
+                // Selalu 2 baris x 2 kolom, baik landscape/tablet maupun
+                // portrait/phone: baris atas PENJUALAN + INVOICE,
+                // baris bawah PENYESUAIAN STOK + REKAP PEMBAYARAN.
+                //
+                // PENJUALAN & PENYESUAIAN STOK butuh akses store
+                // (m_user_divisi) — kalau user tidak punya outlet sama
+                // sekali, tile-nya di-disable (abu-abu) dan tap
+                // menampilkan warning, bukan masuk ke form kosong/rusak.
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.shopping_cart_rounded,
+                        label: 'PENJUALAN',
+                        description: 'Kasir & transaksi penjualan produk',
+                        compact: compact,
+                        enabled: _hasStoreAccess,
+                        onTap: _hasStoreAccess
+                            ? () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const PenjualanScreen(),
+                                  ),
+                                )
+                            : _showNoStoreAccessWarning,
+                      ),
                     ),
-                  ),
-                  SizedBox(width: gap),
-                  Expanded(
-                    child: _MenuTile(
-                      icon: Icons.description_rounded,
-                      label: 'INVOICE',
-                      description: 'Riwayat transaksi & cetak ulang invoice',
-                      compact: compact,
-                      onTap: () => Navigator.push(
+                    SizedBox(width: gap),
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.description_rounded,
+                        label: 'INVOICE',
+                        description: 'Riwayat transaksi & cetak ulang invoice',
+                        compact: compact,
+                        onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) => const InvoiceListScreen())),
+                            builder: (_) => const InvoiceListScreen(),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              SizedBox(height: gap),
-              Row(
-                children: [
-                  Expanded(
-                    child: _MenuTile(
-                      icon: Icons.inventory_2_rounded,
-                      label: 'PENYESUAIAN STOK',
-                      description: 'Update selisih & set total stok produk',
-                      compact: compact,
-                      enabled: _hasAdjustmentAccess,
-                      onTap: _hasAdjustmentAccess
-                          ? () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const AdjustmentScreen()))
-                          : _showNoAdjustmentAccessWarning,
+                  ],
+                ),
+                SizedBox(height: gap),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.inventory_2_rounded,
+                        label: 'PENYESUAIAN STOK',
+                        description: 'Update selisih & set total stok produk',
+                        compact: compact,
+                        enabled: _hasAdjustmentAccess,
+                        onTap: _hasAdjustmentAccess
+                            ? () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const AdjustmentScreen(),
+                                  ),
+                                )
+                            : _showNoAdjustmentAccessWarning,
+                      ),
                     ),
-                  ),
-                  SizedBox(width: gap),
-                  Expanded(
-                    child: _MenuTile(
-                      icon: Icons.payments_rounded,
-                      label: 'REKAP PEMBAYARAN',
-                      description: 'Rekap omset per metode pembayaran',
-                      compact: compact,
-                      onTap: () => Navigator.push(
+                    SizedBox(width: gap),
+                    Expanded(
+                      child: _MenuTile(
+                        icon: Icons.payments_rounded,
+                        label: 'REKAP PEMBAYARAN',
+                        description: 'Rekap omset per metode pembayaran',
+                        compact: compact,
+                        onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) =>
-                                  const LaporanPembayaranScreen())),
+                            builder: (_) => const LaporanPembayaranScreen(),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              SizedBox(height: compact ? 8 : 20),
-            ],
+                  ],
+                ),
+                SizedBox(height: compact ? 8 : 20),
+              ],
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 
   // ── Stat Cards ───────────────────────────────────────────
   // Tablet / layar lebar (w >= 600): 1 row, 3 card sejajar.
   // HP / layar sempit  (w <  600): row 1 = 1 card besar (Total
   // Penjualan), row 2 = 2 card kecil (Invoice Hari Ini & Status Printer).
-  Widget _buildStatCards(
-      {required bool compact, required double gap, required double w}) {
+  Widget _buildStatCards({
+    required bool compact,
+    required double gap,
+    required double w,
+  }) {
     final totalPenjualanCard = _MiniStatCard(
       icon: Icons.trending_up_rounded,
       iconBg: const Color(0xFFF0FFF4),
@@ -559,23 +580,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             large: true,
           ),
           SizedBox(height: gap),
-          Row(children: [
-            Expanded(child: invoiceCard),
-            SizedBox(width: gap),
-            Expanded(child: printerCard),
-          ]),
+          Row(
+            children: [
+              Expanded(child: invoiceCard),
+              SizedBox(width: gap),
+              Expanded(child: printerCard),
+            ],
+          ),
         ],
       );
     }
 
     // ── Layar lebar (tablet): 3 card sejajar 1 row ──
-    return Row(children: [
-      Expanded(child: invoiceCard),
-      SizedBox(width: gap),
-      Expanded(child: totalPenjualanCard),
-      SizedBox(width: gap),
-      Expanded(child: printerCard),
-    ]);
+    return Row(
+      children: [
+        Expanded(child: invoiceCard),
+        SizedBox(width: gap),
+        Expanded(child: totalPenjualanCard),
+        SizedBox(width: gap),
+        Expanded(child: printerCard),
+      ],
+    );
   }
 
   String _formatRupiah(double val) {
@@ -730,8 +755,11 @@ class _MiniStatCard extends StatelessWidget {
               color: iconBg,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon,
-                color: iconColor, size: large ? 24 : (compact ? 15 : 19)),
+            child: Icon(
+              icon,
+              color: iconColor,
+              size: large ? 24 : (compact ? 15 : 19),
+            ),
           ),
           SizedBox(width: large ? 14 : (compact ? 7 : 10)),
           Expanded(
@@ -846,10 +874,15 @@ class _MenuTile extends StatelessWidget {
                         color: Colors.white.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: Colors.white.withOpacity(0.15), width: 1),
+                          color: Colors.white.withOpacity(0.15),
+                          width: 1,
+                        ),
                       ),
-                      child: Icon(icon,
-                          color: Colors.white, size: compact ? 22 : 32),
+                      child: Icon(
+                        icon,
+                        color: Colors.white,
+                        size: compact ? 22 : 32,
+                      ),
                     ),
                     const Spacer(),
                     Container(
@@ -860,7 +893,9 @@ class _MenuTile extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        enabled ? Icons.arrow_forward_ios_rounded : Icons.lock_outline_rounded,
+                        enabled
+                            ? Icons.arrow_forward_ios_rounded
+                            : Icons.lock_outline_rounded,
                         color: Colors.white,
                         size: 12,
                       ),
@@ -882,10 +917,7 @@ class _MenuTile extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     description,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 11,
-                    ),
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -914,7 +946,9 @@ class _MenuTile extends StatelessWidget {
                       ),
                       const SizedBox(width: 4),
                       Icon(
-                        enabled ? Icons.arrow_forward_rounded : Icons.lock_outline_rounded,
+                        enabled
+                            ? Icons.arrow_forward_rounded
+                            : Icons.lock_outline_rounded,
                         color: Colors.white,
                         size: 11,
                       ),
@@ -956,11 +990,7 @@ class _BottomNavItem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                icon,
-                color: selected ? _blue : Colors.grey[400],
-                size: 24,
-              ),
+              Icon(icon, color: selected ? _blue : Colors.grey[400], size: 24),
               const SizedBox(height: 4),
               Text(
                 label,
