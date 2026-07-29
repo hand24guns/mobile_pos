@@ -70,6 +70,15 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   int _shiftID = 0;
   bool _isLoading = true;
 
+  // ── Error state untuk load awal (_loadMinimalData) ─────────────
+  // Dulu error di chain load awal (cekShiftUser/getStores/getNumber/
+  // getChannels/dst) ditelan diam-diam oleh try/catch terluar — hasilnya
+  // Scaffold tetap dirender "seolah sukses" (isLoading=false) padahal
+  // sebagian data gagal ke-load (channel kosong, grid produk kosong,
+  // dsb) tanpa ada tanda apa pun ke kasir. Sekarang dibedakan tegas:
+  // gagal → tampilkan layar retry, BUKAN Scaffold kosong yang menipu.
+  bool _loadError = false;
+
   // ── Guard: cegah simpan Pending / Bayar saat ada operasi yang
   // sedang mengubah harga/temp_invoice (insert produk, update qty,
   // hapus item, voucher, ganti channel). Mencegah race condition
@@ -97,6 +106,11 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // Struktur: [ { 'id': int, 'nama': String, 'produk': [ {kode,nama,hpj,image} ] } ]
   List<Map<String, dynamic>> _imageCategories = [];
   bool _isLoadingImages = false;
+  // true jika load terakhir GAGAL (network/timeout/parse), dibedakan
+  // dari _imageCategories.isEmpty yang berarti "memang tidak ada produk
+  // bergambar" — supaya UI bisa tampilkan tombol retry, bukan pesan
+  // "tidak ada produk" yang menyesatkan saat penyebabnya koneksi putus.
+  bool _imageLoadError = false;
 
   // ── Anti-double-tap guard untuk image grid ────────────────────
   // Kode yang sedang diproses tidak bisa di-tap lagi sampai selesai.
@@ -255,6 +269,52 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // Load awal gagal total (mis. koneksi putus di tengah chain
+    // cekShiftUser/getStores/getNumber/getChannels/dst) — jangan
+    // render Scaffold transaksi dengan data yang setengah-setengah,
+    // tampilkan layar retry yang jelas.
+    if (_loadError) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF5F5F5),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.wifi_off_rounded, size: 56, color: Colors.grey.shade400),
+                const SizedBox(height: 16),
+                const Text(
+                  'Gagal memuat data transaksi.\nPeriksa koneksi internet Anda.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 15, color: Colors.black87),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: _retryLoadMinimalData,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Coba Lagi'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1D273B),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: _goToHome,
+                  child: const Text('Kembali ke Home'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
 
     final state = ref.watch(penjualanProvider);

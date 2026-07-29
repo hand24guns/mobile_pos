@@ -316,27 +316,43 @@ extension PenjualanProductsX on _PenjualanScreenState {
   // ============================================================
   Future<void> _loadImageProducts() async {
     if (_isLoadingImages) return;
-    _setState(() => _isLoadingImages = true);
+    _setState(() {
+      _isLoadingImages = true;
+      _imageLoadError = false;
+    });
     try {
       final state = ref.read(penjualanProvider);
       final dio = ApiService.getDio(token: _token);
 
-      final rawRes = await dio
-          .post(
-            '/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getImageProducts',
-              'organisasi_id': state.organisasiID,
-              'salestipe_id': state.salesTipeID,
-            }),
-            options: Options(responseType: ResponseType.plain),
-          )
-          .timeout(const Duration(seconds: 12));
+      // Retry ringan (2x) untuk request ini juga — grid produk adalah
+      // hal pertama yang dilihat kasir, jadi blip koneksi sesaat
+      // sebaiknya coba pulih sendiri dulu sebelum tampil ke user
+      // sebagai "gagal, tap retry".
+      final rawRes = await _withRetry(
+        () => dio
+            .post(
+              '/penjualan.php',
+              data: FormData.fromMap({
+                'action': 'getImageProducts',
+                'organisasi_id': state.organisasiID,
+                'salestipe_id': state.salesTipeID,
+              }),
+              options: Options(responseType: ResponseType.plain),
+            )
+            .timeout(const Duration(seconds: 12)),
+        maxAttempts: 2,
+      );
 
       final rawStr = rawRes.data?.toString() ?? '';
 
       final jsonStart = rawStr.indexOf('{');
       if (jsonStart < 0) {
+        // Response tidak valid (bukan JSON) — ini kegagalan, bukan
+        // "memang tidak ada produk". Dulu di-return begitu saja dan
+        // _imageCategories tetap [] tanpa penanda apa pun, sehingga UI
+        // menampilkan "Tidak ada produk dengan gambar" yang menyesatkan.
+        debugPrint('[_loadImageProducts] response tidak valid: $rawStr');
+        if (mounted) _setState(() => _imageLoadError = true);
         return;
       }
       final parsed = jsonDecode(rawStr.substring(jsonStart)) as Map;
@@ -370,8 +386,18 @@ extension PenjualanProductsX on _PenjualanScreenState {
           _setState(() => _imageCategories = categories);
           _prewarmImageCache();
         }
+      } else {
+        // 'data' bukan List sama sekali — response backend tidak
+        // sesuai kontrak, perlakukan sebagai gagal juga.
+        debugPrint('[_loadImageProducts] field data bukan List: $parsed');
+        if (mounted) _setState(() => _imageLoadError = true);
       }
     } catch (e) {
+      // Dulu: catch kosong, error timeout/connection reset ditelan
+      // total tanpa jejak. Sekarang ditandai + dilog supaya UI bisa
+      // tawarkan tombol retry alih-alih diam menampilkan grid kosong.
+      debugPrint('[_loadImageProducts] gagal: $e');
+      if (mounted) _setState(() => _imageLoadError = true);
     } finally {
       if (mounted) _setState(() => _isLoadingImages = false);
     }

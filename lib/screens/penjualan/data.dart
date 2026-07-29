@@ -4,6 +4,54 @@
 part of 'penjualan_screen.dart';
 
 extension PenjualanDataX on _PenjualanScreenState {
+  // ============================================================
+  // RETRY HELPER — untuk request kritikal di chain load awal
+  // (cekShiftUser, getStores, getOrganisasiID, getNumber, getChannels,
+  // getCaraBayar). Kalau salah satu gagal (timeout/connection reset di
+  // 4G/tethering yang naik-turun), seluruh chain dulu langsung batal
+  // dan ditelan diam-diam oleh catch di _loadMinimalData — akibatnya
+  // Scaffold tetap dirender "sukses" (isLoading=false) padahal Channel
+  // dropdown kosong, grid produk kosong, dsb, tanpa pesan apa pun.
+  //
+  // Sekarang: retry otomatis dengan backoff naik (1s, 2s) dulu sebelum
+  // benar-benar dianggap gagal, supaya blip koneksi sesaat tidak
+  // langsung menjatuhkan seluruh layar ke error state.
+  // ============================================================
+  Future<T> _withRetry<T>(
+    Future<T> Function() action, {
+    int maxAttempts = 3,
+  }) async {
+    DioException? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await action();
+      } on DioException catch (e) {
+        lastError = e;
+        debugPrint(
+          '[_withRetry] percobaan $attempt/$maxAttempts gagal: ${e.message}',
+        );
+        if (attempt < maxAttempts) {
+          await Future.delayed(Duration(seconds: attempt));
+        }
+      }
+    }
+    throw lastError!;
+  }
+
+  /// Dipanggil dari tombol "Coba Lagi" di layar error (lihat build()
+  /// di penjualan_screen.dart). Reset state loading lalu ulangi chain
+  /// dari awal.
+  Future<void> _retryLoadMinimalData() async {
+    if (mounted) {
+      _setState(() {
+        _isLoading = true;
+        _loadError = false;
+      });
+    }
+    await _loadMinimalData();
+    _focusSku();
+  }
+
   Future<void> _loadMinimalData() async {
     try {
       final session = await SessionService.getSession();
@@ -14,9 +62,11 @@ extension PenjualanDataX on _PenjualanScreenState {
       final dio = ApiService.getDio(token: _token);
 
       // Cek apakah user sudah punya shift aktif
-      final shiftUserRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
+      final shiftUserRes = await _withRetry(
+        () => dio.post(
+          '/penjualan.php',
+          data: FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
+        ),
       );
 
       int storeID = 0;
@@ -44,9 +94,11 @@ extension PenjualanDataX on _PenjualanScreenState {
         );
       } else {
         // Belum punya shift → pilih store dulu, lalu shift check
-        final storeRes = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({'action': 'getStores', 'user_id': _userID}),
+        final storeRes = await _withRetry(
+          () => dio.post(
+            '/penjualan.php',
+            data: FormData.fromMap({'action': 'getStores', 'user_id': _userID}),
+          ),
         );
         final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
 
@@ -66,12 +118,14 @@ extension PenjualanDataX on _PenjualanScreenState {
         storeID = int.parse(pickedStore['id'].toString());
         storeName = pickedStore['nama'].toString();
 
-        final orgRes = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getOrganisasiID',
-            'store_id': storeID,
-          }),
+        final orgRes = await _withRetry(
+          () => dio.post(
+            '/penjualan.php',
+            data: FormData.fromMap({
+              'action': 'getOrganisasiID',
+              'store_id': storeID,
+            }),
+          ),
         );
         organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
         _isFnb = (orgRes.data['is_fnb'] as int? ?? 0) == 1;
@@ -90,7 +144,21 @@ extension PenjualanDataX on _PenjualanScreenState {
         );
       }
     } catch (e) {
-      if (mounted) _setState(() => _isLoading = false);
+      // Dulu: hanya _isLoading = false, error ditelan diam-diam.
+      // Akibatnya Scaffold transaksi tetap dirender "sukses" walau
+      // sebagian/seluruh data (channel, cara bayar, nomor invoice,
+      // grid produk) gagal ke-load — persis gejala di laporan bug:
+      // semua field kelihatan ada tapi kosong, tanpa pesan error.
+      //
+      // Sekarang: tandai _loadError = true supaya build() menampilkan
+      // layar retry yang jelas, bukan Scaffold dengan data setengah.
+      debugPrint('[_loadMinimalData] gagal: $e');
+      if (mounted) {
+        _setState(() {
+          _isLoading = false;
+          _loadError = true;
+        });
+      }
     }
   }
 
@@ -174,31 +242,42 @@ extension PenjualanDataX on _PenjualanScreenState {
     required int organisasiID,
     required String storeName,
   }) async {
-    final numberRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getNumber',
-        'store_id': storeID,
-        'device_token': _deviceToken,
-      }),
+    // getNumber/getChannels/getCaraBayar adalah data WAJIB sebelum
+    // kasir bisa transaksi (nomor invoice, pilihan channel, pilihan
+    // cara bayar) — makanya dibungkus _withRetry, bukan getStoreData
+    // di bawah yang sifatnya cuma banner tambahan (WA disconnect) dan
+    // memang boleh diam kalau gagal.
+    final numberRes = await _withRetry(
+      () => dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getNumber',
+          'store_id': storeID,
+          'device_token': _deviceToken,
+        }),
+      ),
     );
     final number = numberRes.data['number'];
 
-    final channelRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getChannels',
-        'organisasi_id': organisasiID,
-      }),
+    final channelRes = await _withRetry(
+      () => dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getChannels',
+          'organisasi_id': organisasiID,
+        }),
+      ),
     );
     _channels = List<Map<String, dynamic>>.from(channelRes.data['data'] ?? []);
 
-    final caraBayarRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getCaraBayar',
-        'organisasi_id': organisasiID,
-      }),
+    final caraBayarRes = await _withRetry(
+      () => dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getCaraBayar',
+          'organisasi_id': organisasiID,
+        }),
+      ),
     );
     _caraBayarList = List<Map<String, dynamic>>.from(
       caraBayarRes.data['data'] ?? [],

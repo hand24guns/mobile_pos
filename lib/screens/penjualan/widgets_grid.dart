@@ -80,6 +80,39 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
     if (_isLoadingImages) {
       return const Center(child: CircularProgressIndicator());
     }
+
+    // Gagal load (network/timeout/response tidak valid) — DIBEDAKAN
+    // dari "memang tidak ada produk bergambar" di bawah. Dulu keduanya
+    // menampilkan pesan yang sama ("Tidak ada produk dengan gambar"),
+    // jadi kasir tidak bisa tahu apakah harus coba lagi atau ini
+    // memang kondisi normal (kategori tanpa gambar produk).
+    if (_imageLoadError) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.wifi_off_rounded,
+              size: 48,
+              color: Colors.grey.shade400,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Gagal memuat produk. Periksa koneksi Anda.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _loadImageProducts,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_imageCategories.isEmpty) {
       return Center(
         child: Column(
