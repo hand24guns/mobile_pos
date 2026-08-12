@@ -194,10 +194,7 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (compact)
-              _buildCompactToolbar()
-            else
-              _buildPortraitHeader(),
+            if (compact) _buildCompactToolbar() else _buildPortraitHeader(),
             Expanded(child: _buildBody(compact: compact)),
           ],
         ),
@@ -358,7 +355,8 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
                 const SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: _blue),
+                  child:
+                      CircularProgressIndicator(strokeWidth: 2, color: _blue),
                 ),
               ],
             ],
@@ -550,8 +548,8 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
                   itemCount: filtered.length,
                   separatorBuilder: (_, __) =>
                       Divider(height: 1, color: Colors.grey.shade200),
-                  itemBuilder: (context, i) =>
-                      _buildTableRow(filtered[i] as Map<String, dynamic>, i, compact),
+                  itemBuilder: (context, i) => _buildTableRow(
+                      filtered[i] as Map<String, dynamic>, i, compact),
                 ),
               ),
             ],
@@ -641,7 +639,9 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
               _formatNumber((item['qty'] as num?) ?? 0),
               textAlign: TextAlign.right,
               style: TextStyle(
-                  color: _green, fontWeight: FontWeight.w700, fontSize: fontSize),
+                  color: _green,
+                  fontWeight: FontWeight.w700,
+                  fontSize: fontSize),
             ),
           ),
         ],
@@ -670,7 +670,7 @@ class _MiniStat extends StatelessWidget {
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -711,7 +711,7 @@ class _HeaderStat extends StatelessWidget {
       width: fullWidth ? double.infinity : null,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(

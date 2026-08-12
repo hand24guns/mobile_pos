@@ -85,9 +85,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'Default: ${ApiService.defaultBaseUrl}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: Colors.white54,
                       fontSize: 12,
                     ),
@@ -245,7 +245,8 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Align(
               alignment: Alignment.topRight,
               child: IconButton(
-                icon: const Icon(Icons.settings_ethernet, color: Colors.white54),
+                icon:
+                    const Icon(Icons.settings_ethernet, color: Colors.white54),
                 tooltip: 'Pengaturan Server',
                 onPressed: _showBaseUrlDialog,
               ),

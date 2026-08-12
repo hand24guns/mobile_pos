@@ -44,7 +44,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   int? _organisasiID;
   String _storeName = '';
   String _number = '';
-  DateTime _tanggal = DateTime.now();
+  final DateTime _tanggal = DateTime.now();
   String _tipe = 'adjust'; // 'adjust' = Update Selisih, 'count' = Set Total
 
   // ── SKU search — auto-focus untuk barcode scanner, sama seperti
@@ -115,10 +115,11 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     });
 
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'getStores',
-        'user_id': _userID,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getStores',
+            'user_id': _userID,
+          }));
       if (res.data['success'] == true) {
         _storeOptions = List<Map<String, dynamic>>.from(res.data['data']);
       }
@@ -175,7 +176,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   Future<int?> _fetchOrganisasiID(int storeID) async {
     final res = await _dio.post(
       '/penjualan.php',
-      data: FormData.fromMap({'action': 'getOrganisasiID', 'store_id': storeID}),
+      data:
+          FormData.fromMap({'action': 'getOrganisasiID', 'store_id': storeID}),
       options: Options(responseType: ResponseType.plain),
     );
     final parsed = _parseJsonPlain(res.data?.toString() ?? '');
@@ -189,12 +191,14 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   Future<String?> _fetchNumberAdjustment(int storeID) async {
     final res = await _dio.post(
       '/penjualan.php',
-      data: FormData.fromMap({'action': 'getNumberAdjustment', 'store_id': storeID}),
+      data: FormData.fromMap(
+          {'action': 'getNumberAdjustment', 'store_id': storeID}),
       options: Options(responseType: ResponseType.plain),
     );
     final parsed = _parseJsonPlain(res.data?.toString() ?? '');
     if (parsed == null || parsed['success'] != true) {
-      debugPrint('[getNumberAdjustment] gagal: ${parsed?['message'] ?? res.data}');
+      debugPrint(
+          '[getNumberAdjustment] gagal: ${parsed?['message'] ?? res.data}');
       return null;
     }
     return parsed['number']?.toString();
@@ -230,11 +234,12 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     }
 
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'searchProdukAdjustment',
-        'term': term,
-        'organisasi_id': _organisasiID,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'searchProdukAdjustment',
+            'term': term,
+            'organisasi_id': _organisasiID,
+          }));
 
       final data = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
       if (data.isEmpty) {
@@ -288,13 +293,14 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     });
 
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'insertItemAdjustment',
-        'kode': kode,
-        'qty': 1,
-        'number': _number,
-        'organisasi_id': _organisasiID,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'insertItemAdjustment',
+            'kode': kode,
+            'qty': 1,
+            'number': _number,
+            'organisasi_id': _organisasiID,
+          }));
 
       if (res.data['success'] == true) {
         await _refreshList();
@@ -322,13 +328,15 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   Future<void> _refreshList() async {
     if (_number.isEmpty) return;
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'getListAdjustment',
-        'number': _number,
-        'organisasi_id': _organisasiID,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getListAdjustment',
+            'number': _number,
+            'organisasi_id': _organisasiID,
+          }));
       if (mounted && res.data['success'] == true) {
-        setState(() => _items = List<Map<String, dynamic>>.from(res.data['data']));
+        setState(
+            () => _items = List<Map<String, dynamic>>.from(res.data['data']));
       }
     } catch (_) {}
   }
@@ -336,11 +344,12 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   Future<void> _refreshTotal() async {
     if (_number.isEmpty) return;
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'getTotalQtyAdjustment',
-        'number': _number,
-        'organisasi_id': _organisasiID,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getTotalQtyAdjustment',
+            'number': _number,
+            'organisasi_id': _organisasiID,
+          }));
       if (mounted && res.data['success'] == true) {
         setState(() => _totalQty = res.data['total_qty'] ?? 0);
       }
@@ -349,12 +358,13 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
 
   Future<void> _updateQty(String kode, int qty) async {
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'updateQtyAdjustment',
-        'kode': kode,
-        'qty': qty,
-        'number': _number,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'updateQtyAdjustment',
+            'kode': kode,
+            'qty': qty,
+            'number': _number,
+          }));
       if (res.data['success'] == true) {
         await _refreshTotal();
       } else {
@@ -368,12 +378,13 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
 
   Future<void> _deleteItem(String kode) async {
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'deleteItemAdjustment',
-        'kode': kode,
-        'number': _number,
-        'organisasi_id': _organisasiID,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'deleteItemAdjustment',
+            'kode': kode,
+            'number': _number,
+            'organisasi_id': _organisasiID,
+          }));
       if (res.data['success'] == true) {
         await _refreshList();
         await _refreshTotal();
@@ -450,14 +461,15 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
 
     setState(() => _saving = true);
     try {
-      final res = await _dio.post('/penjualan.php', data: FormData.fromMap({
-        'action': 'simpanAdjustment',
-        'store_id': _storeID,
-        'organisasi_id': _organisasiID,
-        'tanggal': _formatDate(_tanggal),
-        'number': _number,
-        'tipe': _tipe,
-      }));
+      final res = await _dio.post('/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'simpanAdjustment',
+            'store_id': _storeID,
+            'organisasi_id': _organisasiID,
+            'tanggal': _formatDate(_tanggal),
+            'number': _number,
+            'tipe': _tipe,
+          }));
 
       if (!mounted) return;
 
@@ -465,11 +477,14 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
         await showDialog(
           context: context,
           builder: (_) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Text('Berhasil'),
             content: const Text('Transaksi penyesuaian berhasil disimpan'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK')),
             ],
           ),
         );
@@ -497,13 +512,13 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     );
   }
 
-
   // ============================================================
   // BUILD
   // ============================================================
   @override
   Widget build(BuildContext context) {
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
 
     return Scaffold(
       backgroundColor: _bgGray,
@@ -578,7 +593,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
             children: [
               Expanded(
                 child: _outlets.length <= 1
-                    ? _readOnlyField('Store', _storeName.isEmpty ? '-' : _storeName)
+                    ? _readOnlyField(
+                        'Store', _storeName.isEmpty ? '-' : _storeName)
                     : DropdownButtonFormField<int>(
                         initialValue: _storeID,
                         decoration: const InputDecoration(
@@ -594,14 +610,16 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                             .toList(),
                         onChanged: (val) {
                           if (val == null) return;
-                          final match = _storeOptions.firstWhere((s) => int.parse(s['id'].toString()) == val);
+                          final match = _storeOptions.firstWhere(
+                              (s) => int.parse(s['id'].toString()) == val);
                           _selectStore(val, match['nama'].toString());
                         },
                       ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _readOnlyField('No. Dokumen', _number.isEmpty ? '-' : _number),
+                child: _readOnlyField(
+                    'No. Dokumen', _number.isEmpty ? '-' : _number),
               ),
             ],
           ),
@@ -626,7 +644,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                     border: OutlineInputBorder(),
                   ),
                   items: const [
-                    DropdownMenuItem(value: 'adjust', child: Text('Update Selisih')),
+                    DropdownMenuItem(
+                        value: 'adjust', child: Text('Update Selisih')),
                     DropdownMenuItem(value: 'count', child: Text('Set Total')),
                   ],
                   onChanged: (val) {
@@ -642,7 +661,9 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                 child: TextField(
                   controller: _skuController,
                   focusNode: _skuFocusNode,
-                  keyboardType: _skuKeyboardVisible ? TextInputType.text : TextInputType.none,
+                  keyboardType: _skuKeyboardVisible
+                      ? TextInputType.text
+                      : TextInputType.none,
                   onTap: _focusSkuWithKeyboard,
                   decoration: const InputDecoration(
                     hintText: 'Cari produk / SKU',
@@ -672,7 +693,9 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
         fillColor: Colors.grey.shade100,
         border: const OutlineInputBorder(),
       ),
-      child: Text(value, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.black87)),
+      child: Text(value,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.black87)),
     );
   }
 
@@ -686,9 +709,11 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.image_not_supported_outlined, size: 40, color: Colors.grey.shade400),
+            Icon(Icons.image_not_supported_outlined,
+                size: 40, color: Colors.grey.shade400),
             const SizedBox(height: 8),
-            Text('Tidak ada produk dengan gambar', style: TextStyle(color: Colors.grey.shade500)),
+            Text('Tidak ada produk dengan gambar',
+                style: TextStyle(color: Colors.grey.shade500)),
           ],
         ),
       );
@@ -706,7 +731,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
               labelColor: _navy,
               unselectedLabelColor: Colors.grey,
               indicatorColor: _navy,
-              labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              labelStyle:
+                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               tabs: _imageCategories
                   .map((cat) => Tab(text: cat['nama']?.toString() ?? ''))
                   .toList(),
@@ -715,7 +741,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
           Expanded(
             child: TabBarView(
               children: _imageCategories.map((cat) {
-                return _buildProductGrid(cat['produk'] as List<Map<String, dynamic>>);
+                return _buildProductGrid(
+                    cat['produk'] as List<Map<String, dynamic>>);
               }).toList(),
             ),
           ),
@@ -729,7 +756,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
       builder: (context, constraints) {
         const columns = 4;
         const spacing = 8.0;
-        final cellWidth = (constraints.maxWidth - spacing * (columns + 1)) / columns;
+        final cellWidth =
+            (constraints.maxWidth - spacing * (columns + 1)) / columns;
         final cellHeight = cellWidth + 32; // gambar square + 1 baris nama
         final childAspectRatio = cellWidth / cellHeight;
 
@@ -756,7 +784,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                 child: Card(
                   elevation: 2,
                   clipBehavior: Clip.antiAlias,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                   child: Stack(
                     children: [
                       Column(
@@ -768,12 +797,14 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                             child: _AdjustmentImageTile(imageUrl: imageUrl),
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 4),
                             child: Text(
                               nama,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                  fontSize: 10, fontWeight: FontWeight.w600),
                             ),
                           ),
                         ],
@@ -781,7 +812,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                       if (isProcessing)
                         const Positioned.fill(
                           child: Center(
-                            child: CircularProgressIndicator(strokeWidth: 2, color: _navy),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: _navy),
                           ),
                         ),
                     ],
@@ -798,7 +830,9 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   // ── List item adjustment ──
   Widget _buildItemList() {
     if (_items.isEmpty) {
-      return const Center(child: Text('Belum ada produk diinput', style: TextStyle(color: Colors.grey)));
+      return const Center(
+          child: Text('Belum ada produk diinput',
+              style: TextStyle(color: Colors.grey)));
     }
 
     return ListView.separated(
@@ -825,7 +859,12 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, -2))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 8,
+              offset: const Offset(0, -2))
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -835,8 +874,13 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('TOTAL QTY', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                  Text('$_totalQty', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _navyMid)),
+                  const Text('TOTAL QTY',
+                      style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  Text('$_totalQty',
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: _navyMid)),
                 ],
               ),
             ),
@@ -845,13 +889,15 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: _navy,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
               ),
               icon: _saving
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
                     )
                   : const Icon(Icons.save_outlined),
               label: const Text('Simpan'),
@@ -905,7 +951,8 @@ class _AdjustmentImageTileState extends State<_AdjustmentImageTile> {
         final stillTrying = _attempt < _maxAutoRetry;
         return Container(
           color: Colors.grey.shade200,
-          child: Icon(stillTrying ? Icons.wifi_off_rounded : Icons.broken_image, color: Colors.grey, size: 22),
+          child: Icon(stillTrying ? Icons.wifi_off_rounded : Icons.broken_image,
+              color: Colors.grey, size: 22),
         );
       },
     );
@@ -949,7 +996,8 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
   @override
   void didUpdateWidget(covariant _AdjustmentItemRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.qty != widget.qty && _qtyController.text != widget.qty.toString()) {
+    if (oldWidget.qty != widget.qty &&
+        _qtyController.text != widget.qty.toString()) {
       _qtyController.text = widget.qty.toString();
     }
   }
@@ -965,7 +1013,8 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
     final qty = int.tryParse(val);
     if (qty == null) return;
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 500), () => widget.onQtyChanged(qty));
+    _debounce = Timer(
+        const Duration(milliseconds: 500), () => widget.onQtyChanged(qty));
   }
 
   @override
@@ -975,7 +1024,9 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4)
+        ],
       ),
       child: Row(
         children: [
@@ -988,7 +1039,8 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
                   widget.nama,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 12),
                 ),
                 Text(
                   widget.kode,
@@ -1009,7 +1061,8 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
               style: const TextStyle(fontSize: 13),
               decoration: const InputDecoration(
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                contentPadding:
+                    EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 border: OutlineInputBorder(),
               ),
               onChanged: _onChanged,

@@ -360,6 +360,15 @@ extension PenjualanPaymentX on _PenjualanScreenState {
     required PenjualanState currentState,
     bool isKitchenMode = false,
   }) async {
+    // ── Tangkap keterangan SEBELUM await apa pun ─────────────────
+    // _resetTransaksi() (yang membersihkan _keteranganController)
+    // bisa jalan bersamaan (race) dengan fungsi print ini karena
+    // pemanggilnya tidak selalu meng-await print sampai selesai.
+    // Kalau dibaca setelah network call (getStoreData dsb), ada
+    // kemungkinan controller sudah ke-clear duluan → keterangan
+    // kosong di struk yang baru saja dicetak.
+    final keteranganTrx = _keteranganController.text.trim();
+
     try {
       // ── Pastikan printer terhubung ───────────────────────────
       final connected = await PrinterHelper.isConnected();
@@ -405,8 +414,7 @@ extension PenjualanPaymentX on _PenjualanScreenState {
       // (jasa_perusahaan == 3 di dim_organisasi → FnB/resto)
       final isFnb = _isFnb;
 
-      // ── Keterangan transaksi dari controller ─────────────────
-      final keteranganTrx = _keteranganController.text.trim();
+      // (keteranganTrx sudah ditangkap di awal fungsi — lihat atas)
 
       // ── Siapkan items — include keterangan per item ──────────
       final items = currentState.items
@@ -571,7 +579,15 @@ extension PenjualanPaymentX on _PenjualanScreenState {
     required String caraBayar,
     required PenjualanState currentState,
   }) async {
-    await showModalBottomSheet(
+    // Bottom sheet hanya MENGEMBALIKAN pilihan kasir (customer/kitchen/both),
+    // tidak langsung memanggil fungsi print di dalam onTap. Print yang
+    // sebenarnya dijalankan (dan di-await) SETELAH showModalBottomSheet
+    // selesai, di bawah. Ini penting supaya `await _showPrintSheet(...)`
+    // di pemanggil baru benar-benar resolve setelah print selesai —
+    // sebelumnya print jalan fire-and-forget dan bisa race dengan
+    // _resetTransaksi() yang dipanggil tepat setelahnya (controller
+    // keterangan bisa ke-clear sebelum sempat dibaca oleh print).
+    final selected = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -614,49 +630,21 @@ extension PenjualanPaymentX on _PenjualanScreenState {
                 ),
                 title: const Text('Customer Copy'),
                 subtitle: const Text('Struk untuk pelanggan'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _handlePrint(
-                    invoiceNumber: invoiceNumber,
-                    kembalian: kembalian,
-                    caraBayar: caraBayar,
-                    currentState: currentState,
-                    isKitchenMode: false,
-                  );
-                },
+                onTap: () => Navigator.pop(ctx, 'customer'),
               ),
               // Kitchen copy
               ListTile(
                 leading: const Icon(Icons.kitchen, color: Colors.orange),
                 title: const Text('Kitchen Copy'),
                 subtitle: const Text('Struk untuk dapur'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  // isKitchenMode=true tapi kita hanya mau kitchen saja.
-                  // _handlePrint dengan isKitchenMode=true + isFnb=true
-                  // akan masuk ke PrinterHelper.printBoth.
-                  // Untuk print kitchen-only kita panggil helper langsung.
-                  _printKitchenOnly(
-                    invoiceNumber: invoiceNumber,
-                    currentState: currentState,
-                  );
-                },
+                onTap: () => Navigator.pop(ctx, 'kitchen'),
               ),
               // Keduanya
               ListTile(
                 leading: const Icon(Icons.print_rounded, color: Colors.green),
                 title: const Text('Customer + Kitchen'),
                 subtitle: const Text('Print dua-duanya'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _handlePrint(
-                    invoiceNumber: invoiceNumber,
-                    kembalian: kembalian,
-                    caraBayar: caraBayar,
-                    currentState: currentState,
-                    isKitchenMode: true,
-                  );
-                },
+                onTap: () => Navigator.pop(ctx, 'both'),
               ),
               const SizedBox(height: 8),
             ],
@@ -664,6 +652,42 @@ extension PenjualanPaymentX on _PenjualanScreenState {
         ),
       ),
     );
+
+    // Sheet sudah tertutup di sini. Jalankan print sesuai pilihan dan
+    // AWAIT sampai selesai sebelum _showPrintSheet() ini return.
+    switch (selected) {
+      case 'customer':
+        await _handlePrint(
+          invoiceNumber: invoiceNumber,
+          kembalian: kembalian,
+          caraBayar: caraBayar,
+          currentState: currentState,
+          isKitchenMode: false,
+        );
+        break;
+      case 'kitchen':
+        // isKitchenMode=true tapi kita hanya mau kitchen saja.
+        // _handlePrint dengan isKitchenMode=true + isFnb=true
+        // akan masuk ke PrinterHelper.printBoth.
+        // Untuk print kitchen-only kita panggil helper langsung.
+        await _printKitchenOnly(
+          invoiceNumber: invoiceNumber,
+          currentState: currentState,
+        );
+        break;
+      case 'both':
+        await _handlePrint(
+          invoiceNumber: invoiceNumber,
+          kembalian: kembalian,
+          caraBayar: caraBayar,
+          currentState: currentState,
+          isKitchenMode: true,
+        );
+        break;
+      default:
+        // Kasir menutup sheet tanpa memilih — tidak print apa-apa.
+        break;
+    }
   }
 
   // ── Print kitchen-only setelah bayar (tanpa struk customer) ──
@@ -671,6 +695,9 @@ extension PenjualanPaymentX on _PenjualanScreenState {
     required String invoiceNumber,
     required PenjualanState currentState,
   }) async {
+    // ── Tangkap keterangan SEBELUM await apa pun (lihat _handlePrint) ──
+    final keteranganTrx = _keteranganController.text.trim();
+
     try {
       final connected = await PrinterHelper.isConnected();
       if (!connected) {
@@ -702,7 +729,7 @@ extension PenjualanPaymentX on _PenjualanScreenState {
       );
       final storeName = storeRes.data['nama'] ?? '';
 
-      final keteranganTrx = _keteranganController.text.trim();
+      // (keteranganTrx sudah ditangkap di awal fungsi — lihat atas)
 
       final items = currentState.items
           .map(

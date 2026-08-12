@@ -254,10 +254,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 width: isTablet ? 64 : 54,
                 height: isTablet ? 64 : 54,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
+                  color: Colors.white.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: Colors.white.withOpacity(0.3),
+                    color: Colors.white.withValues(alpha: 0.3),
                     width: 1.5,
                   ),
                 ),
@@ -317,10 +317,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: _blueLight.withOpacity(0.35),
+                            color: _blueLight.withValues(alpha: 0.35),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                              color: _blueLight.withOpacity(0.5),
+                              color: _blueLight.withValues(alpha: 0.5),
                             ),
                           ),
                           child: Text(
@@ -619,7 +619,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 12,
             offset: const Offset(0, -2),
           ),
@@ -682,9 +682,9 @@ class _HeaderIconBtn extends StatelessWidget {
             width: size,
             height: size,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
+              color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
             ),
             child: Icon(icon, color: Colors.white, size: isTablet ? 24 : 22),
           ),
@@ -740,7 +740,7 @@ class _MiniStatCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -852,7 +852,7 @@ class _MenuTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: (enabled ? _navy : Colors.grey).withOpacity(0.3),
+                color: (enabled ? _navy : Colors.grey).withValues(alpha: 0.3),
                 blurRadius: 10,
                 offset: const Offset(0, 3),
               ),
@@ -871,10 +871,10 @@ class _MenuTile extends StatelessWidget {
                       width: iconBox,
                       height: iconBox,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.12),
+                        color: Colors.white.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.15),
+                          color: Colors.white.withValues(alpha: 0.15),
                           width: 1,
                         ),
                       ),
@@ -889,7 +889,7 @@ class _MenuTile extends StatelessWidget {
                       width: compact ? 26 : 32,
                       height: compact ? 26 : 32,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
+                        color: Colors.white.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
@@ -930,7 +930,8 @@ class _MenuTile extends StatelessWidget {
                     vertical: compact ? 6 : 8,
                   ),
                   decoration: BoxDecoration(
-                    color: enabled ? _blue : Colors.white.withOpacity(0.25),
+                    color:
+                        enabled ? _blue : Colors.white.withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(

@@ -383,7 +383,7 @@ class _OutletSettingScreenState extends State<OutletSettingScreen> {
         ),
         Switch(
           value: _waAktif,
-          activeColor: _blue,
+          activeThumbColor: _blue,
           onChanged: (value) => setState(() => _waAktif = value),
         ),
         Text(

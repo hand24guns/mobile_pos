@@ -89,15 +89,15 @@ class _PackageDialogState extends State<PackageDialog> {
     double total = 0;
     _cachedAddonGroups.forEach((grupKey, grupData) {
       final items = (grupData['items'] as List?) ?? [];
-      final tipe  = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
+      final tipe = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
 
       if (tipe == 'single') {
         final selectedId = _selectedSingle[grupKey];
         if (selectedId != null) {
           final dynamic item = items.cast<dynamic>().firstWhere(
-            (i) => i['m_package_addon_id'] == selectedId,
-            orElse: () => null,
-          );
+                (i) => i['m_package_addon_id'] == selectedId,
+                orElse: () => null,
+              );
           if (item != null) total += _toDouble(item['harga_tambah']);
         }
       } else {
@@ -131,29 +131,31 @@ class _PackageDialogState extends State<PackageDialog> {
     // A) Map dengan { tipe_pilihan, grup_label, items: [...] }  ← format baru (benar)
     // B) List langsung [ {...}, {...} ]                          ← format lama (legacy)
     final result = <String, dynamic>{};
-    (raw as Map).forEach((key, value) {
+    (raw).forEach((key, value) {
       if (value is Map) {
         // Format A — sudah benar, pastikan 'items' ada
         result[key.toString()] = {
           'tipe_pilihan': value['tipe_pilihan']?.toString() ?? 'multiple',
-          'grup_label':   value['grup_label']?.toString() ?? key.toString(),
-          'items':        (value['items'] as List?)
-                              ?.map((e) => Map<String, dynamic>.from(e as Map))
-                              .toList() ?? [],
+          'grup_label': value['grup_label']?.toString() ?? key.toString(),
+          'items': (value['items'] as List?)
+                  ?.map((e) => Map<String, dynamic>.from(e as Map))
+                  .toList() ??
+              [],
         };
       } else if (value is List) {
         // Format B — legacy List langsung [{m_package_addon_id, nama, tipe_pilihan, ...}]
         // Baca tipe_pilihan dari item pertama jika ada, default multiple
         final legacyItems = value
-            .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e as Map))
+            .map<Map<String, dynamic>>(
+                (e) => Map<String, dynamic>.from(e as Map))
             .toList();
         final tipeDariItem = legacyItems.isNotEmpty
             ? (legacyItems.first['tipe_pilihan']?.toString() ?? 'multiple')
             : 'multiple';
         result[key.toString()] = {
           'tipe_pilihan': tipeDariItem,
-          'grup_label':   key.toString(),
-          'items':        legacyItems,
+          'grup_label': key.toString(),
+          'items': legacyItems,
         };
       }
     });
@@ -199,19 +201,19 @@ class _PackageDialogState extends State<PackageDialog> {
     final result = <Map<String, dynamic>>[];
     _cachedAddonGroups.forEach((grupKey, grupData) {
       final items = (grupData['items'] as List?) ?? [];
-      final tipe  = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
+      final tipe = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
 
       if (tipe == 'single') {
         final selectedId = _selectedSingle[grupKey];
         if (selectedId != null) {
           final dynamic item = items.cast<dynamic>().firstWhere(
-            (i) => i['m_package_addon_id'] == selectedId,
-            orElse: () => null,
-          );
+                (i) => i['m_package_addon_id'] == selectedId,
+                orElse: () => null,
+              );
           if (item != null) {
             result.add({
-              'id':    selectedId,
-              'nama':  item['nama'],
+              'id': selectedId,
+              'nama': item['nama'],
               'harga': _toDouble(item['harga_tambah']),
             });
           }
@@ -221,8 +223,8 @@ class _PackageDialogState extends State<PackageDialog> {
           final id = item['m_package_addon_id'] as int;
           if (_selectedMultiple.contains(id)) {
             result.add({
-              'id':    id,
-              'nama':  item['nama'],
+              'id': id,
+              'nama': item['nama'],
               'harga': _toDouble(item['harga_tambah']),
             });
           }
@@ -257,7 +259,7 @@ class _PackageDialogState extends State<PackageDialog> {
     final isianDipilih = _isianList
         .where((i) => _selectedIsian.contains(i['m_package_isian_id'] as int))
         .map<Map<String, dynamic>>((i) => {
-              'id':   i['m_package_isian_id'],
+              'id': i['m_package_isian_id'],
               'nama': i['nama'],
             })
         .toList();
@@ -340,7 +342,7 @@ class _PackageDialogState extends State<PackageDialog> {
           Text(
             'Harga dasar: ${_rupiah(_basePrice)}',
             style: TextStyle(
-                color: Colors.white.withOpacity(0.65), fontSize: 12),
+                color: Colors.white.withValues(alpha: 0.65), fontSize: 12),
           ),
         ],
       ),
@@ -384,7 +386,7 @@ class _PackageDialogState extends State<PackageDialog> {
           spacing: 8,
           runSpacing: 8,
           children: _isianList.map<Widget>((item) {
-            final id       = item['m_package_isian_id'] as int;
+            final id = item['m_package_isian_id'] as int;
             final selected = _selectedIsian.contains(id);
             return GestureDetector(
               onTap: () => setState(() {
@@ -395,9 +397,8 @@ class _PackageDialogState extends State<PackageDialog> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: selected
-                      ? const Color(0xFF1D273B)
-                      : Colors.grey.shade100,
+                  color:
+                      selected ? const Color(0xFF1D273B) : Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: selected
@@ -443,27 +444,27 @@ class _PackageDialogState extends State<PackageDialog> {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         const SizedBox(height: 10),
         ..._cachedAddonGroups.entries.map((entry) {
-          final grupKey  = entry.key;
+          final grupKey = entry.key;
           final grupData = entry.value as Map<String, dynamic>;
-          final items    = (grupData['items'] as List?) ?? [];
-          final tipe     = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
+          final items = (grupData['items'] as List?) ?? [];
+          final tipe = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
 
           if (items.isEmpty) return const SizedBox.shrink();
 
           // Ambil grup_label dari grupData (level grup) dulu,
           // fallback ke items[0] untuk backward compat, lalu ke capitalize
-          final grupLabel =
-              (grupData['grup_label'] as String?)?.isNotEmpty == true
-                  ? grupData['grup_label'] as String
-                  : (items.isNotEmpty
-                      ? (items[0]['grup_label'] as String?) ?? _capitalize(grupKey)
-                      : _capitalize(grupKey));
+          final grupLabel = (grupData['grup_label'] as String?)?.isNotEmpty ==
+                  true
+              ? grupData['grup_label'] as String
+              : (items.isNotEmpty
+                  ? (items[0]['grup_label'] as String?) ?? _capitalize(grupKey)
+                  : _capitalize(grupKey));
 
           return _buildAddonGrup(
-            grupKey:   grupKey,
+            grupKey: grupKey,
             grupLabel: grupLabel,
-            items:     items,
-            tipe:      tipe,
+            items: items,
+            tipe: tipe,
           );
         }),
       ],
@@ -497,8 +498,7 @@ class _PackageDialogState extends State<PackageDialog> {
               ),
               const SizedBox(width: 6),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
                   color: isSingle
                       ? const Color(0xFFDBEAFE) // biru-lt
@@ -525,7 +525,7 @@ class _PackageDialogState extends State<PackageDialog> {
             spacing: 8,
             runSpacing: 8,
             children: items.map<Widget>((item) {
-              final id    = item['m_package_addon_id'] as int;
+              final id = item['m_package_addon_id'] as int;
               final harga = _toDouble(item['harga_tambah']);
               final selected = isSingle
                   ? _selectedSingle[grupKey] == id
@@ -606,9 +606,8 @@ class _PackageDialogState extends State<PackageDialog> {
                         item['nama'],
                         style: TextStyle(
                           color: selected ? Colors.white : Colors.black87,
-                          fontWeight: selected
-                              ? FontWeight.bold
-                              : FontWeight.normal,
+                          fontWeight:
+                              selected ? FontWeight.bold : FontWeight.normal,
                           fontSize: 13,
                         ),
                       ),
@@ -621,7 +620,7 @@ class _PackageDialogState extends State<PackageDialog> {
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: selected
-                                ? Colors.white.withOpacity(0.2)
+                                ? Colors.white.withValues(alpha: 0.2)
                                 : Colors.orange.shade100,
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -661,15 +660,13 @@ class _PackageDialogState extends State<PackageDialog> {
         children: [
           _priceRow('Harga dasar', _rupiah(_basePrice), Colors.black87),
           if (_addonTotal > 0)
-            _priceRow(
-                '+ Add-on', _rupiah(_addonTotal), Colors.orange.shade700),
+            _priceRow('+ Add-on', _rupiah(_addonTotal), Colors.orange.shade700),
           const Divider(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Total',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15)),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
               Text(
                 _rupiah(_totalHarga),
                 style: const TextStyle(
@@ -691,8 +688,7 @@ class _PackageDialogState extends State<PackageDialog> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: const TextStyle(color: Colors.grey, fontSize: 13)),
+          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
           Text(value,
               style: TextStyle(
                   color: valueColor,
@@ -728,8 +724,7 @@ class _PackageDialogState extends State<PackageDialog> {
           focusNode: _keteranganFocus,
           decoration: InputDecoration(
             hintText: 'Contoh: tanpa es, level pedas 2, dll.',
-            hintStyle:
-                TextStyle(color: Colors.grey.shade400, fontSize: 13),
+            hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(color: Colors.grey.shade300),

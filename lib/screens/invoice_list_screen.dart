@@ -364,12 +364,12 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
       // 4. Store data dari invoice — BUKAN dari shift user
       final storeData = results[2] as Map<String, dynamic>;
-      final storeName    = invoice['store']?.toString() ?? '';
+      final storeName = invoice['store']?.toString() ?? '';
       final storeAddress = storeData['alamat']?.toString() ?? '';
-      final storeNpwp    = storeData['npwp']?.toString() ?? '';
-      final invoiceNote  = storeData['invoice_note']?.toString() ?? '';
+      final storeNpwp = storeData['npwp']?.toString() ?? '';
+      final invoiceNote = storeData['invoice_note']?.toString() ?? '';
       final logoFileName = storeData['logo_file_name']?.toString() ?? '';
-      final logoUrl      = storeData['logo_url']?.toString() ?? '';
+      final logoUrl = storeData['logo_url']?.toString() ?? '';
 
       // 5. Waktu transaksi
       final tanggal = invoice['tanggal'].toString().length >= 16
@@ -797,7 +797,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.15),
+                                  color: Colors.white.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
@@ -851,7 +851,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                                 horizontal: 8, vertical: 2),
                                             decoration: BoxDecoration(
                                               color: const Color(0xFF1D273B)
-                                                  .withOpacity(0.08),
+                                                  .withValues(alpha: 0.08),
                                               borderRadius:
                                                   BorderRadius.circular(4),
                                             ),

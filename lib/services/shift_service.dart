@@ -1,13 +1,14 @@
 import 'package:dio/dio.dart';
 import 'api_service.dart';
-import 'session_service.dart';
 
 /// Status shift di divisi
 enum ShiftStatus {
   /// Belum ada shift aktif → user harus buka shift
   tidakAda,
+
   /// Shift aktif milik user ini → bisa langsung masuk
   milikSaya,
+
   /// Shift aktif tapi milik user lain → blokir
   milikOrangLain,
 }
@@ -40,10 +41,10 @@ class ShiftService {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'cekShift',
-          'store_id':      storeID,
+          'action': 'cekShift',
+          'store_id': storeID,
           'organisasi_id': organisasiID,
-          'user_id':       userID,
+          'user_id': userID,
         }));
 
     final data = res.data;
@@ -52,15 +53,15 @@ class ShiftService {
     switch (statusCode) {
       case 1:
         return ShiftResult(
-          status:      ShiftStatus.milikSaya,
-          shiftID:     data['shift_id'] ?? 0,
-          modalKasir:  (data['modal_kasir'] as num?)?.toDouble() ?? 0,
+          status: ShiftStatus.milikSaya,
+          shiftID: data['shift_id'] ?? 0,
+          modalKasir: (data['modal_kasir'] as num?)?.toDouble() ?? 0,
         );
       case 2:
         return ShiftResult(
-          status:     ShiftStatus.milikOrangLain,
-          shiftID:    data['shift_id'] ?? 0,
-          kasirNama:  data['kasir_nama'] ?? 'User lain',
+          status: ShiftStatus.milikOrangLain,
+          shiftID: data['shift_id'] ?? 0,
+          kasirNama: data['kasir_nama'] ?? 'User lain',
         );
       default:
         return const ShiftResult(status: ShiftStatus.tidakAda);
@@ -81,11 +82,11 @@ class ShiftService {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'bukaShift',
-          'store_id':      storeID,
+          'action': 'bukaShift',
+          'store_id': storeID,
           'organisasi_id': organisasiID,
-          'user_id':       userID,
-          'modal_kasir':   modalKasir,
+          'user_id': userID,
+          'modal_kasir': modalKasir,
         }));
 
     if (res.data['success'] == true) {
@@ -107,18 +108,18 @@ class ShiftService {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':        'getRekapShift',
-          'shift_id':      shiftID,
-          'store_id':      storeID,
+          'action': 'getRekapShift',
+          'shift_id': shiftID,
+          'store_id': storeID,
           'organisasi_id': organisasiID,
         }));
 
     if (res.data['success'] == true) {
       return {
-        'open_shift':     res.data['open_shift'] ?? '',
-        'modal_kasir':    (res.data['modal_kasir'] as num?)?.toDouble() ?? 0,
+        'open_shift': res.data['open_shift'] ?? '',
+        'modal_kasir': (res.data['modal_kasir'] as num?)?.toDouble() ?? 0,
         'jumlah_invoice': res.data['jumlah_invoice'] ?? 0,
-        'total_sales':    (res.data['total_sales'] as num?)?.toDouble() ?? 0,
+        'total_sales': (res.data['total_sales'] as num?)?.toDouble() ?? 0,
       };
     }
     return {};
@@ -139,11 +140,11 @@ class ShiftService {
 
     final res = await dio.post('/penjualan.php',
         data: FormData.fromMap({
-          'action':         'tutupShift',
-          'shift_id':       shiftID,
-          'store_id':       storeID,
-          'organisasi_id':  organisasiID,
-          'total_sales':    totalSales,
+          'action': 'tutupShift',
+          'shift_id': shiftID,
+          'store_id': storeID,
+          'organisasi_id': organisasiID,
+          'total_sales': totalSales,
           'jumlah_invoice': jumlahInvoice,
         }));
 

@@ -201,8 +201,8 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
     final double priceFontSize = _isTinyTablet ? 10.0 : 12;
     // Tiny: padding lebih kecil (4dp total) agar cell lebih pendek
     final double textVerticalPadding = _isTinyTablet ? 4 : 10;
-    final double textGap = 2;
-    final double safetyBuffer = 2;
+    const double textGap = 2;
+    const double safetyBuffer = 2;
     // Tiny tablet: nama 1 baris saja agar cell lebih pendek → muat 2 baris grid
     final int nameMaxLines = _isTinyTablet ? 1 : 2;
 

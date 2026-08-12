@@ -81,10 +81,11 @@ class _LaporanPembayaranScreenState
         double amt = 0;
         for (final r in rows) {
           freq += _parseNum(r['jumlah']).toInt();
-          amt  += _parseNum(r['total']);
+          amt += _parseNum(r['total']);
         }
         final sorted = List<Map<String, dynamic>>.from(rows)
-          ..sort((a, b) => _parseNum(b['total']).compareTo(_parseNum(a['total'])));
+          ..sort(
+              (a, b) => _parseNum(b['total']).compareTo(_parseNum(a['total'])));
         setState(() {
           _rows = sorted;
           _totalFreq = freq;
@@ -212,20 +213,20 @@ class _LaporanPembayaranScreenState
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
+                    color: Colors.white.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                     border:
-                        Border.all(color: Colors.white.withOpacity(0.2)),
+                        Border.all(color: Colors.white.withValues(alpha: 0.2)),
                   ),
                   child: const Icon(Icons.arrow_back_ios_new_rounded,
                       color: Colors.white, size: 18),
                 ),
               ),
               const SizedBox(width: 14),
-              Expanded(
+              const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
+                  children: [
                     Text(
                       'Laporan Cara Bayar',
                       style: TextStyle(
@@ -249,10 +250,10 @@ class _LaporanPembayaranScreenState
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
+                    color: Colors.white.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                     border:
-                        Border.all(color: Colors.white.withOpacity(0.2)),
+                        Border.all(color: Colors.white.withValues(alpha: 0.2)),
                   ),
                   child: const Icon(Icons.refresh_rounded,
                       color: Colors.white, size: 20),
@@ -276,9 +277,7 @@ class _LaporanPembayaranScreenState
           const SizedBox(width: 8),
           const Text('Periode:',
               style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: _navy)),
+                  fontSize: 13, fontWeight: FontWeight.w600, color: _navy)),
           const SizedBox(width: 10),
           Expanded(
             child: _DateChip(
@@ -304,8 +303,7 @@ class _LaporanPembayaranScreenState
   // ── Body ─────────────────────────────────────────────────
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(
-          child: CircularProgressIndicator(color: _blue));
+      return const Center(child: CircularProgressIndicator(color: _blue));
     }
 
     if (_rows.isEmpty) {
@@ -317,12 +315,10 @@ class _LaporanPembayaranScreenState
                 size: 64, color: Colors.grey[300]),
             const SizedBox(height: 12),
             Text('Tidak ada data',
-                style:
-                    TextStyle(color: Colors.grey[400], fontSize: 15)),
+                style: TextStyle(color: Colors.grey[400], fontSize: 15)),
             const SizedBox(height: 4),
             Text('Coba ubah periode tanggal',
-                style:
-                    TextStyle(color: Colors.grey[400], fontSize: 12)),
+                style: TextStyle(color: Colors.grey[400], fontSize: 12)),
           ],
         ),
       );
@@ -339,7 +335,7 @@ class _LaporanPembayaranScreenState
           final r = _rows[i];
           final nama = r['nama']?.toString() ?? '-';
           final jumlah = _parseNum(r['jumlah']).toInt();
-          final total  = _parseNum(r['total']);
+          final total = _parseNum(r['total']);
           final accent = _rowAccent(i);
 
           return Container(
@@ -348,7 +344,7 @@ class _LaporanPembayaranScreenState
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -366,7 +362,7 @@ class _LaporanPembayaranScreenState
                         width: 28,
                         height: 28,
                         decoration: BoxDecoration(
-                          color: accent.withOpacity(0.12),
+                          color: accent.withValues(alpha: 0.12),
                           shape: BoxShape.circle,
                         ),
                         child: Center(
@@ -396,7 +392,7 @@ class _LaporanPembayaranScreenState
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: accent.withOpacity(0.1),
+                          color: accent.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
@@ -419,7 +415,6 @@ class _LaporanPembayaranScreenState
                       ),
                     ],
                   ),
-
                 ],
               ),
             ),
@@ -436,7 +431,7 @@ class _LaporanPembayaranScreenState
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -508,8 +503,7 @@ class _DateChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
           color: const Color(0xFFEFF6FF),
           borderRadius: BorderRadius.circular(8),
@@ -518,8 +512,7 @@ class _DateChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.calendar_month_rounded,
-                size: 14, color: _blue),
+            const Icon(Icons.calendar_month_rounded, size: 14, color: _blue),
             const SizedBox(width: 5),
             Flexible(
               child: Text(
