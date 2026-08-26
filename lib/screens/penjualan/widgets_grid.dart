@@ -288,7 +288,7 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
                                     height: 1.25,
                                   ),
                                 ),
-                                SizedBox(height: textGap),
+                                const SizedBox(height: textGap),
                                 Text(
                                   'Rp ${CurrencyFormat.format(hpj)}',
                                   style: TextStyle(

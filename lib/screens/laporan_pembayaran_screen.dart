@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../services/session_service.dart';
 import '../services/api_service.dart';
+import 'invoice_list_screen.dart';
 
 // ─── Palette (sama dengan home_screen) ──────────────────────
 const Color _navy = Color(0xFF0D1B3E);
@@ -26,6 +27,13 @@ class _LaporanPembayaranScreenState
   bool _isLoading = false;
   List<int> _outlets = [];
 
+  // Filter outlet — 1 store dipilih sekaligus, sama seperti pola di
+  // menu Laporan (OnhandReportScreen/ItemTerjualReportScreen/dst).
+  List<Map<String, dynamic>> _stores = []; // [{id, nama}]
+  int? _selectedStore;
+
+  bool get _singleStore => _outlets.length <= 1;
+
   // Filter state
   DateTime _startDate = DateTime.now();
   DateTime _endDate = DateTime.now();
@@ -46,12 +54,95 @@ class _LaporanPembayaranScreenState
     if (!mounted) return;
     setState(() {
       _outlets = List<int>.from(session['outlets'] ?? []);
+      _selectedStore = _outlets.isNotEmpty ? _outlets.first : null;
     });
+    await _loadStores();
+    _fetchData();
+  }
+
+  Future<void> _loadStores() async {
+    try {
+      final session = await SessionService.getSession();
+      final token = session['token'] ?? '';
+      final response = await http.post(
+        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: {
+          'action': 'getStores',
+          'user_id': (session['user_id'] ?? '').toString(),
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (!mounted) return;
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) {
+        final raw = (data['stores'] ?? data['data'] ?? []) as List<dynamic>;
+        setState(() {
+          _stores = raw.map((e) {
+            final m = e as Map<String, dynamic>;
+            return {
+              'id': m['id'] ?? m['dim_divisi_id'] ?? m['store_id'],
+              'nama': m['nama'] ?? m['store_name'] ?? m['name'],
+            };
+          }).toList();
+        });
+      }
+    } catch (_) {
+      // Gagal ambil nama store — chip fallback tampilkan ID saja.
+    }
+  }
+
+  String _storeName(int id) {
+    final match = _stores.firstWhere(
+      (s) => s['id'].toString() == id.toString(),
+      orElse: () => {},
+    );
+    return (match['nama'] as String?) ?? 'Store $id';
+  }
+
+  Future<void> _pickStore() async {
+    final picked = await showDialog<int?>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Pilih Outlet',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        children: _stores.map((s) {
+          final id = s['id'] as int;
+          final nama = s['nama'] as String;
+          final selected = _selectedStore == id;
+          return SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, id),
+            child: Row(
+              children: [
+                Icon(Icons.storefront_outlined,
+                    size: 18, color: selected ? _blue : Colors.grey),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(nama,
+                      style: TextStyle(
+                          fontWeight:
+                              selected ? FontWeight.bold : FontWeight.normal,
+                          color: selected ? _blue : null)),
+                ),
+                if (selected)
+                  const Icon(Icons.check, size: 16, color: _blue),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+
+    if (picked == null || picked == _selectedStore) return;
+    setState(() => _selectedStore = picked);
     _fetchData();
   }
 
   Future<void> _fetchData() async {
-    if (_outlets.isEmpty) return;
+    if (_selectedStore == null) return;
     setState(() => _isLoading = true);
 
     try {
@@ -66,7 +157,7 @@ class _LaporanPembayaranScreenState
         },
         body: {
           'action': 'getLaporanPembayaran',
-          'store_ids': _outlets.join(','),
+          'store_ids': _selectedStore.toString(),
           'start_date': _fmtDate(_startDate),
           'end_date': _fmtDate(_endDate),
         },
@@ -132,13 +223,12 @@ class _LaporanPembayaranScreenState
     return 'Rp $parts';
   }
 
-  Future<void> _pickDate({required bool isStart}) async {
-    final initial = isStart ? _startDate : _endDate;
-    final picked = await showDatePicker(
+  Future<void> _pickDateRange() async {
+    final picked = await showDateRangePicker(
       context: context,
-      initialDate: initial,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
+      initialDateRange: DateTimeRange(start: _startDate, end: _endDate),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
           colorScheme: const ColorScheme.light(
@@ -151,13 +241,8 @@ class _LaporanPembayaranScreenState
     );
     if (picked == null) return;
     setState(() {
-      if (isStart) {
-        _startDate = picked;
-        if (_endDate.isBefore(_startDate)) _endDate = _startDate;
-      } else {
-        _endDate = picked;
-        if (_startDate.isAfter(_endDate)) _startDate = _endDate;
-      }
+      _startDate = picked.start;
+      _endDate = picked.end;
     });
     _fetchData();
   }
@@ -174,6 +259,21 @@ class _LaporanPembayaranScreenState
       Color(0xFFEF4444),
     ];
     return colors[index % colors.length];
+  }
+
+  // Drill-down: buka Invoice List sudah ter-filter ke cara bayar ini +
+  // rentang tanggal yang sedang dipakai di laporan ini, supaya jumlah
+  // transaksi yang tampil konsisten dengan angka di baris yang di-tap.
+  void _openInvoiceList({required String caraBayar}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => InvoiceListScreen(
+          initialCaraBayarName: caraBayar,
+          initialDateFrom: _startDate,
+          initialDateTo: _endDate,
+        ),
+      ),
+    );
   }
 
   @override
@@ -266,33 +366,40 @@ class _LaporanPembayaranScreenState
     );
   }
 
-  // ── Filter tanggal ───────────────────────────────────────
+  // ── Filter outlet & tanggal — 1 baris ────────────────────
   Widget _buildFilterBar() {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          const Icon(Icons.calendar_today_rounded, size: 16, color: _blue),
-          const SizedBox(width: 8),
-          const Text('Periode:',
-              style: TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600, color: _navy)),
+          const Icon(Icons.storefront_rounded, size: 16, color: _blue),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _singleStore
+                ? Text(
+                    _outlets.isNotEmpty ? _storeName(_outlets.first) : '-',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _navy),
+                    overflow: TextOverflow.ellipsis,
+                  )
+                : _StoreChip(
+                    label: _selectedStore != null
+                        ? _storeName(_selectedStore!)
+                        : 'Pilih Outlet',
+                    onTap: _pickStore,
+                  ),
+          ),
           const SizedBox(width: 10),
+          const Icon(Icons.calendar_today_rounded, size: 16, color: _blue),
+          const SizedBox(width: 6),
           Expanded(
             child: _DateChip(
-              label: _fmtDateDisplay(_startDate),
-              onTap: () => _pickDate(isStart: true),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 6),
-            child: Text('–', style: TextStyle(color: Colors.grey)),
-          ),
-          Expanded(
-            child: _DateChip(
-              label: _fmtDateDisplay(_endDate),
-              onTap: () => _pickDate(isStart: false),
+              label:
+                  '${_fmtDateDisplay(_startDate)} – ${_fmtDateDisplay(_endDate)}',
+              onTap: _pickDateRange,
             ),
           ),
         ],
@@ -338,84 +445,91 @@ class _LaporanPembayaranScreenState
           final total = _parseNum(r['total']);
           final accent = _rowAccent(i);
 
-          return Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      // Nomor
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: accent.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            '${i + 1}',
-                            style: TextStyle(
-                              color: accent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
+          return GestureDetector(
+            onTap: () => _openInvoiceList(caraBayar: nama),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        // Nomor
+                        Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              '${i + 1}',
+                              style: TextStyle(
+                                color: accent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          nama,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            nama,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: _navy,
+                            ),
+                          ),
+                        ),
+                        // Frekuensi badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '$jumlah transaksi',
+                            style: TextStyle(
+                              color: accent,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          _formatRupiah(total),
                           style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
                             color: _navy,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
                           ),
                         ),
-                      ),
-                      // Frekuensi badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: accent.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          '$jumlah transaksi',
-                          style: TextStyle(
-                            color: accent,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        _formatRupiah(total),
-                        style: const TextStyle(
-                          color: _navy,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(width: 4),
+                        Icon(Icons.chevron_right_rounded,
+                            size: 18, color: Colors.grey[350]),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -486,6 +600,49 @@ class _LaporanPembayaranScreenState
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Helper widget: store chip ────────────────────────────────
+class _StoreChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _StoreChip({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF6FF),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFBFDBFE)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.storefront_outlined, size: 14, color: _blue),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: _blue,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down_rounded, size: 16, color: _blue),
+          ],
+        ),
       ),
     );
   }

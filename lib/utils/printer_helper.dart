@@ -681,21 +681,24 @@ class PrinterHelper {
     return (customer: customerOk, kitchen: kitchenOk);
   }
 
-  // ── Print struk pending order (customer copy tanpa harga) ───
+  // ── Print struk pending order (customer copy, lengkap dengan harga) ─
   //
   // Struk untuk customer saat order di-hold (pending payment).
+  // Sekarang disamakan dengan printInvoice — item list, diskon,
+  // isian/addon, dan summary Diskon/Voucher/TOTAL semuanya identik.
   // Perbedaan dengan printInvoice:
-  //   • Tidak ada harga per item (tidak ada baris "qty × hpj = subtotal")
-  //   • Tidak ada diskon per item
-  //   • Tidak ada summary Gross / Diskon / Bayar / Kembali
-  //   • Bagian bawah hanya satu baris "ESTIMASI: xxx" (bukan TOTAL)
+  //   • Header "*** PENDING ORDER ***" sebelum nama toko
+  //   • Tidak ada section Bayar / Cara Bayar / Kembali — diganti satu
+  //     baris keterangan "--- Belum Dibayar ---" (bold, center)
   //   • Tidak ada ribbon COPY (selalu first print)
   //   • Tidak ada DPP / Pajak
-  //   • Header "*** PENDING ORDER ***" sebelum nama toko
+  //   • Gross & Diskon hanya tampil jika diskon > 0 — jika tidak ada
+  //     diskon, langsung tampilkan TOTAL saja
   //
-  // [items] — minimal butuh field 'nama', 'qty',
-  //           'packages_notes', 'keterangan' per item.
-  // [estimasiTotal] — nilai total estimasi yang ditampilkan di bawah.
+  // [items] — sama seperti printInvoice: 'nama', 'qty', 'hpj', 'subtotal',
+  //           'diskon_persen'/'diskon_nominal', 'packages_notes'
+  //           (atau fallback 'isian'/'addon'), 'keterangan'.
+  // [gross] / [diskon] / [total] — sama seperti printInvoice.
   static Future<bool> printPendingOrder({
     required String storeName,
     required String storeAddress,
@@ -704,7 +707,11 @@ class PrinterHelper {
     required String kasir,
     required String memberNama,
     required List<Map<String, dynamic>> items,
-    required double estimasiTotal,
+    required double gross,
+    required double diskon,
+    required double total,
+    // ── Field opsional ────────────────────────────────────────────
+    String? voucherKode,
     String? npwp,
     String? invoiceNote,
     String? salesTipe,
@@ -803,29 +810,40 @@ class PrinterHelper {
 
     bytes += generator.hr();
 
-    // ── ITEM LIST — hanya nama + qty, tanpa harga ────────────────
+    // ── ITEM LIST dengan harga, diskon, isian & addon ────────────
+    // (identik dengan printInvoice)
     for (var item in items) {
-      // Nama produk (bold)
+      // Nama produk
       bytes += generator.text(
         item['nama'] as String,
         styles: const PosStyles(bold: true),
       );
 
-      // Baris qty saja — tidak ada harga
+      // Baris qty × harga = subtotal
       final qty = item['qty'];
-      bytes += generator.text('  Qty: $qty');
+      final hpj = _formatNumber(item['hpj']);
+      final subtotal = _formatNumber(item['subtotal']);
+      bytes += generator.text('  $qty x $hpj = $subtotal');
 
-      // Sub-item: isian & addon (tanpa harga addon)
+      // Diskon (jika ada)
+      if ((item['diskon_persen'] ?? 0) > 0) {
+        bytes += generator.text('  Diskon: ${item['diskon_persen']}%');
+      } else if ((item['diskon_nominal'] ?? 0) > 0) {
+        bytes += generator
+            .text('  Diskon: ${_formatNumber(item['diskon_nominal'])}');
+      }
+
+      // ── Sub-item: isian & addon ──────────────────────────────
+      // Prioritas 1: packages_notes (JSON string gabungan)
+      // Prioritas 2: field 'isian' dan 'addon' langsung di map item
       final packagesNotesRaw = item['packages_notes'] as String? ?? '';
       if (packagesNotesRaw.isNotEmpty) {
-        final packageLines =
-            _buildPackageLines(packagesNotesRaw, showAddonPrice: false);
+        final packageLines = _buildPackageLines(packagesNotesRaw);
         for (final line in packageLines) {
           bytes += generator.text(line);
         }
       } else {
-        final packageLines =
-            _buildPackageLinesFromMap(item, showAddonPrice: false);
+        final packageLines = _buildPackageLinesFromMap(item);
         for (final line in packageLines) {
           bytes += generator.text(line);
         }
@@ -840,28 +858,77 @@ class PrinterHelper {
 
     bytes += generator.hr();
 
-    // ── ESTIMASI TOTAL — single size + garis pemisah ─────────────
-    // Tidak pakai double-size agar tidak terlalu besar,
-    // tapi tetap noticeable dengan separator di atas & bawah.
+    // ── SUMMARY — Gross & Diskon hanya tampil jika ada diskon ────
+    if (diskon > 0) {
+      bytes += generator.row([
+        PosColumn(text: 'Gross', width: 6),
+        PosColumn(
+          text: _formatNumber(gross),
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
+      ]);
+
+      bytes += generator.row([
+        PosColumn(text: 'Diskon', width: 6),
+        PosColumn(
+          text: _formatNumber(diskon),
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
+      ]);
+    }
+
+    if (voucherKode != null && voucherKode.isNotEmpty) {
+      bytes += generator.row([
+        PosColumn(text: 'Voucher', width: 6),
+        PosColumn(
+          text: voucherKode,
+          width: 6,
+          styles: const PosStyles(align: PosAlign.right),
+        ),
+      ]);
+    }
+
+    bytes += generator.hr();
+
+    // TOTAL — double size
     bytes += generator.row([
       PosColumn(
-        text: 'ESTIMASI',
+        text: 'TOTAL',
         width: 6,
-        styles: const PosStyles(bold: true),
+        styles: const PosStyles(
+          bold: true,
+          height: PosTextSize.size2,
+          width: PosTextSize.size2,
+        ),
       ),
       PosColumn(
-        text: _formatNumber(estimasiTotal),
+        text: _formatNumber(total),
         width: 6,
         styles: const PosStyles(
           align: PosAlign.right,
           bold: true,
+          height: PosTextSize.size2,
+          width: PosTextSize.size2,
         ),
       ),
     ]);
 
     bytes += generator.hr();
 
-    // ── FOOTER ───────────────────────────────────────────────────
+    // ── Keterangan belum dibayar — pengganti section Bayar/Kembali ──
+    bytes += generator.text(
+      '--- Belum Dibayar ---',
+      styles: const PosStyles(
+        align: PosAlign.center,
+        bold: true,
+      ),
+    );
+
+    bytes += generator.hr();
+
+    // ── FOOTER — dari dim_divisi.invoice_note ────────────────────
     final noteText = (invoiceNote != null && invoiceNote.isNotEmpty)
         ? invoiceNote.replaceAll(RegExp(r'<[^>]*>'), '').trim()
         : 'Terima kasih atas kunjungan Anda';
@@ -955,7 +1022,18 @@ class PrinterHelper {
     if (isianRaw is List && isianRaw.isNotEmpty) {
       lines.add('  Isian:');
       for (final item in isianRaw) {
-        lines.add('    * ${item.toString()}');
+        if (item is Map) {
+          // Format baru: {"id": 4, "nama": "Keju"} → tampilkan nama saja
+          final nama = item['nama']?.toString() ?? '';
+          if (nama.isNotEmpty) {
+            lines.add('    * $nama');
+          }
+        } else {
+          // Format lama: string biasa
+          if (item.toString().isNotEmpty) {
+            lines.add('    * ${item.toString()}');
+          }
+        }
       }
     }
 

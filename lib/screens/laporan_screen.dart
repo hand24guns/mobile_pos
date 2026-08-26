@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'laporan/onhand_report.dart';
 import 'laporan/item_terjual_report.dart';
+import 'laporan/channel_terjual_report.dart';
 
 // ─── Palette (samain dengan home_screen.dart) ──────────────
 const Color _navy = Color(0xFF0D1B3E);
 const Color _blue = Color(0xFF2563EB);
 const Color _bgGray = Color(0xFFF0F4FA);
 
-enum _ReportType { none, onhand, itemTerjual }
+enum _ReportType { none, onhand, itemTerjual, channelTerjual }
 
 /// Halaman Laporan: sidebar menu report di kiri (icon kotak + label di
 /// bawahnya), konten report di kanan. Default kosong — report baru
@@ -62,6 +63,13 @@ class _LaporanScreenState extends State<LaporanScreen> {
                 selected: _selected == _ReportType.itemTerjual,
                 onTap: () => setState(() => _selected = _ReportType.itemTerjual),
               ),
+              _SidebarMenuItem(
+                icon: Icons.pie_chart_rounded,
+                label: 'Channel',
+                selected: _selected == _ReportType.channelTerjual,
+                onTap: () =>
+                    setState(() => _selected = _ReportType.channelTerjual),
+              ),
               // Menu report lain nanti ditambahkan di sini, mengikuti
               // pola m_submenu kategori 'Inventory' di versi web
               // (Onhand.php).
@@ -81,6 +89,8 @@ class _LaporanScreenState extends State<LaporanScreen> {
         return OnhandReportScreen(outlets: widget.outlets);
       case _ReportType.itemTerjual:
         return ItemTerjualReportScreen(outlets: widget.outlets);
+      case _ReportType.channelTerjual:
+        return ChannelTerjualReportScreen(outlets: widget.outlets);
       case _ReportType.none:
         return _buildEmptyState();
     }

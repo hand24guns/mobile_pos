@@ -257,15 +257,31 @@ extension PenjualanPendingX on _PenjualanScreenState {
     final state = ref.read(penjualanProvider);
     final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'retrievePending',
-        'sales_order_id': salesOrderID,
-        'number': state.number,
-        'device_token': _deviceToken,
-      }),
-    );
+    // FIX: sebelumnya request ini tidak dibungkus try/catch dan tidak ada
+    // cabang else untuk success:false — kalau backend gagal (exception,
+    // response bukan JSON valid, atau success:false dari validasi server)
+    // method ini diam total: tidak ada snackbar, tidak ada log ke kasir,
+    // tombol retrieve seolah tidak bereaksi ("stuck"). Sekarang setiap
+    // kegagalan selalu tampil ke kasir.
+    Response res;
+    try {
+      res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'retrievePending',
+          'sales_order_id': salesOrderID,
+          'number': state.number,
+          'device_token': _deviceToken,
+        }),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal retrieve order: $e')),
+        );
+      }
+      return;
+    }
 
     if (res.data['success'] == true) {
       final restoredNumber = res.data['number'] as String? ?? state.number;
@@ -325,6 +341,19 @@ extension PenjualanPendingX on _PenjualanScreenState {
           const SnackBar(
             content: Text('Order berhasil di-retrieve'),
             backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } else {
+      // FIX: cabang ini sebelumnya tidak ada — success:false dari server
+      // (mis. FIX 3 di OrderHandler.php: item pending tidak ketemu, atau
+      // pesan error lain) dulu tidak ditampilkan sama sekali ke kasir.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              res.data['message']?.toString() ?? 'Gagal retrieve order',
+            ),
           ),
         );
       }
@@ -562,9 +591,26 @@ extension PenjualanPendingX on _PenjualanScreenState {
         ? order['label'] as String
         : order['kode'] as String;
 
+    // Backend getPendingOrderItems hanya balikin 'total' (sum netto per item),
+    // bukan gross/diskon per order — jadi dihitung di sini dari tiap item:
+    // gross = qty x hpj (sebelum diskon), diskon = gross - subtotal (netto).
+    final pendingItems = List<Map<String, dynamic>>.from(itemsRes.data['data']);
+    double computedGross = 0;
+    double computedDiskon = 0;
+    for (final item in pendingItems) {
+      final qty = (item['qty'] as num?)?.toDouble() ?? 0;
+      final hpj = (item['hpj'] as num?)?.toDouble() ?? 0;
+      final subtotal = (item['subtotal'] as num?)?.toDouble() ?? 0;
+      final lineGross = qty * hpj;
+      computedGross += lineGross;
+      computedDiskon += (lineGross - subtotal);
+    }
+
     return {
-      'items': List<Map<String, dynamic>>.from(itemsRes.data['data']),
-      'estimasiTotal': (itemsRes.data['total'] as num? ?? 0).toDouble(),
+      'items': pendingItems,
+      'total': (itemsRes.data['total'] as num? ?? 0).toDouble(),
+      'gross': computedGross,
+      'diskon': computedDiskon,
       'storeName': storeRes.data['nama'] ?? '',
       'storeAddress': storeRes.data['alamat'] ?? '',
       'storeNpwp': storeRes.data['npwp'] ?? '',
@@ -595,7 +641,9 @@ extension PenjualanPendingX on _PenjualanScreenState {
         kasir: d['kasirNama'],
         memberNama: d['memberNama'],
         items: d['items'],
-        estimasiTotal: d['estimasiTotal'],
+        gross: d['gross'],
+        diskon: d['diskon'],
+        total: d['total'],
         npwp: (d['storeNpwp'] as String).isNotEmpty ? d['storeNpwp'] : null,
         invoiceNote:
             (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
@@ -641,7 +689,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
         kasir: d['kasirNama'],
         memberNama: d['memberNama'],
         items: d['items'],
-        total: d['estimasiTotal'],
+        total: d['total'],
         salesTipe: (d['salesTipeNama'] as String).isNotEmpty
             ? d['salesTipeNama']
             : null,
@@ -683,7 +731,9 @@ extension PenjualanPendingX on _PenjualanScreenState {
         kasir: d['kasirNama'],
         memberNama: d['memberNama'],
         items: d['items'],
-        estimasiTotal: d['estimasiTotal'],
+        gross: d['gross'],
+        diskon: d['diskon'],
+        total: d['total'],
         npwp: (d['storeNpwp'] as String).isNotEmpty ? d['storeNpwp'] : null,
         invoiceNote:
             (d['invoiceNote'] as String).isNotEmpty ? d['invoiceNote'] : null,
@@ -709,7 +759,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
         kasir: d['kasirNama'],
         memberNama: d['memberNama'],
         items: d['items'],
-        total: d['estimasiTotal'],
+        total: d['total'],
         salesTipe: (d['salesTipeNama'] as String).isNotEmpty
             ? d['salesTipeNama']
             : null,

@@ -253,6 +253,181 @@ extension PenjualanProductsX on _PenjualanScreenState {
   }
 
   // ============================================================
+  // EDIT PILIHAN PACKAGE — item yang SUDAH ada di cart
+  // ============================================================
+
+  /// Buka ulang PackageDialog untuk item package yang sudah ada di cart,
+  /// dengan isian/addon lama sudah tercentang (prefill) sesuai
+  /// packages_notes item tersebut.
+  Future<void> _editPackageItem(int index) async {
+    if (_isCartSyncing) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tunggu proses sebelumnya selesai...'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+      return;
+    }
+
+    final state = ref.read(penjualanProvider);
+    final item = state.items[index];
+    if (!item.isPackage) return; // guard tambahan, tombol harusnya tak muncul
+
+    final dio = ApiService.getDio(token: _token);
+
+    Map<String, dynamic> cekData;
+    try {
+      final rawRes = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'cekPackage',
+          'sku': item.kode,
+          'organisasi_id': state.organisasiID,
+          'salestipe_id': state.salesTipeID,
+        }),
+        options: Options(responseType: ResponseType.plain),
+      );
+      final rawStr = rawRes.data?.toString() ?? '';
+      final jsonStart = rawStr.indexOf('{');
+      if (jsonStart < 0) throw Exception('Response cekPackage tidak valid');
+      cekData =
+          Map<String, dynamic>.from(jsonDecode(rawStr.substring(jsonStart)));
+    } catch (e) {
+      debugPrint('[_editPackageItem] gagal ambil data package: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gagal memuat data package'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (cekData['is_package'] != true) {
+      // Produk sudah tidak lagi berstatus package di master data
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Produk ini sudah bukan package lagi'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Parse pilihan sebelumnya dari packages_notes tersimpan.
+    // Format: {"isian":[{"id":..,"nama":..}], "addon":[{"id":..,"nama":..,"harga":..}]}
+    // NOTE: cart lama (sebelum backend disimpan id-nya) mungkin cuma
+    // punya 'nama' tanpa 'id' — untuk kasus itu id dianggap 0 dan
+    // prefill jatuh ke "tidak tercentang" (aman, cuma kurang akurat
+    // khusus untuk item lama yang sudah ada sebelum update ini).
+    Set<int> selectedIsianIds = {};
+    Set<int> selectedAddonIds = {};
+    final prevKeterangan = item.keterangan ?? '';
+    try {
+      final oldNotes =
+          jsonDecode(item.packagesNotes!) as Map<String, dynamic>;
+      selectedIsianIds = ((oldNotes['isian'] as List?) ?? [])
+          .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
+          .where((id) => id != 0)
+          .toSet();
+      selectedAddonIds = ((oldNotes['addon'] as List?) ?? [])
+          .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
+          .where((id) => id != 0)
+          .toSet();
+    } catch (e) {
+      debugPrint('[_editPackageItem] gagal parse packages_notes lama: $e');
+    }
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PackageDialog(
+        sku: item.kode,
+        packageData: cekData,
+        initialSelectedIsianIds: selectedIsianIds,
+        initialSelectedAddonIds: selectedAddonIds,
+        initialKeterangan: prevKeterangan,
+        isEditMode: true,
+        onConfirm: (isianDipilih, addonDipilih, addonTotal, keterangan) {
+          _doEditPackage(
+            sku: item.kode,
+            oldPackagesNotes: item.packagesNotes!,
+            isianDipilih: isianDipilih,
+            addonDipilih: addonDipilih,
+            addonTotal: addonTotal,
+            keterangan: keterangan,
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _doEditPackage({
+    required String sku,
+    required String oldPackagesNotes,
+    required List<Map<String, dynamic>> isianDipilih,
+    required List<Map<String, dynamic>> addonDipilih,
+    required double addonTotal,
+    String keterangan = '',
+  }) async {
+    await _runCartMutation(() async {
+      final state = ref.read(penjualanProvider);
+      final dio = ApiService.getDio(token: _token);
+
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'editPackage',
+          'number': state.number,
+          'sku': sku,
+          'old_packages_notes': oldPackagesNotes,
+          'organisasi_id': state.organisasiID,
+          'store_id': state.storeID,
+          'member_id': state.memberID ?? 0,
+          'voucher': _activeVoucher,
+          'device_token': _deviceToken,
+          'isian': jsonEncode(isianDipilih),
+          'addon': jsonEncode(addonDipilih),
+          'addon_harga': addonTotal,
+          'keterangan': keterangan,
+          'salestipe_id': state.salesTipeID,
+        }),
+      );
+
+      if (res.data['success'] == true) {
+        _checkVoucherValid(res.data);
+        await _refreshFromApi();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Pilihan package berhasil diubah'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(res.data['message'] ?? 'Gagal mengubah package'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    });
+  }
+
+  // ============================================================
   // CEK VOUCHER VALID — auto-lepas jika tidak memenuhi syarat
   // ============================================================
   void _checkVoucherValid(Map<String, dynamic> responseData) {

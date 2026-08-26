@@ -291,7 +291,9 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
               if (val != null) {
                 ref.read(penjualanProvider.notifier).setCaraBayar(val);
                 final currentTotal = ref.read(penjualanProvider).total;
-                _nominalController.text = currentTotal.toStringAsFixed(0);
+                _nominalController.text = CurrencyInputFormatter.thousands(
+                  currentTotal.toStringAsFixed(0),
+                );
                 ref
                     .read(penjualanProvider.notifier)
                     .setNominalBayar(currentTotal);
@@ -305,13 +307,19 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
             controller: _nominalController,
             keyboardType: TextInputType.number,
             style: TextStyle(fontSize: _labelFontSize),
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              CurrencyInputFormatter(),
+            ],
             decoration: inputDeco.copyWith(
               labelText: 'Nominal Bayar',
               prefixText: 'Rp ',
             ),
             onChanged: (val) {
-              final nominal = CurrencyFormat.parse(val);
-              ref.read(penjualanProvider.notifier).setNominalBayar(nominal);
+              final nominal = CurrencyInputFormatter.toNumber(val);
+              ref
+                  .read(penjualanProvider.notifier)
+                  .setNominalBayar(nominal.toDouble());
             },
           ),
         ],

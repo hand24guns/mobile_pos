@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,6 +11,12 @@ class SessionService {
   static const String _keyOutlets     = 'outlets'; // CSV: "1,2,3"
   static const String _keyMenus       = 'menus';   // JSON array of menu path, e.g. ["penyesuaian/Adjustment"]
   static const String _keyDeviceToken = 'device_token';
+
+  // Token disimpan terpisah lewat flutter_secure_storage (Android
+  // Keystore / iOS Keychain, terenkripsi) — bukan SharedPreferences
+  // yang plaintext. Field lain (nama, username, outlets, menus,
+  // device_token) tidak sensitif dan tetap di SharedPreferences.
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   // ============================================================
   // DEVICE TOKEN — generate sekali saat pertama kali install,
@@ -39,7 +46,7 @@ class SessionService {
     List<String> menus = const [],
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyToken,    token);
+    await _secureStorage.write(key: _keyToken, value: token);
     await prefs.setInt(_keyUserID,      userID);
     await prefs.setString(_keyNama,     nama);
     await prefs.setString(_keyUsername, username);
@@ -54,7 +61,7 @@ class SessionService {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_keyOutlets) ?? '';
     return {
-      'token':    prefs.getString(_keyToken)    ?? '',
+      'token':    await _secureStorage.read(key: _keyToken) ?? '',
       'user_id':  prefs.getInt(_keyUserID)      ?? 0,
       'nama':     prefs.getString(_keyNama)     ?? '',
       'username': prefs.getString(_keyUsername) ?? '',
@@ -73,14 +80,13 @@ class SessionService {
 
   // Ambil token
   static Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyToken);
+    return _secureStorage.read(key: _keyToken);
   }
 
   // Cek apakah sudah login
   static Future<bool> isLoggedIn() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyToken) != null;
+    final token = await _secureStorage.read(key: _keyToken);
+    return token != null && token.isNotEmpty;
   }
 
   // ============================================================
@@ -89,7 +95,7 @@ class SessionService {
   // ============================================================
   static Future<void> clearSession() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyToken);
+    await _secureStorage.delete(key: _keyToken);
     await prefs.remove(_keyUserID);
     await prefs.remove(_keyNama);
     await prefs.remove(_keyUsername);

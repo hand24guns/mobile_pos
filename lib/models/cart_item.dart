@@ -27,6 +27,10 @@ class CartItem {
 
   double get gross => qty * hpj;
 
+  /// Item ini punya isian/addon package (bukan produk single).
+  /// Dipakai untuk menentukan apakah tombol "Edit pilihan" ditampilkan.
+  bool get isPackage => packagesNotes != null && packagesNotes!.isNotEmpty;
+
   String get diskonLabel {
     if (diskonPersen > 0) return '${diskonPersen.toStringAsFixed(0)}%';
     if (diskonNominal > 0) return CurrencyFormat.format(diskonNominal);

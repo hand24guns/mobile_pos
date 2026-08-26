@@ -5,10 +5,25 @@ import '../services/session_service.dart';
 import '../utils/currency_format.dart';
 import '../utils/printer_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class InvoiceListScreen extends StatefulWidget {
-  const InvoiceListScreen({super.key});
+  // Filter awal opsional — dipakai saat masuk dari laporan lain
+  // (mis. tap baris "Transaksi" di laporan Channel Terjual), supaya
+  // list langsung tampil ter-filter tanpa user perlu set ulang.
+  final int? initialChannelId;
+  final String? initialChannelName;
+  final String? initialCaraBayarName;
+  final DateTime? initialDateFrom;
+  final DateTime? initialDateTo;
+
+  const InvoiceListScreen({
+    super.key,
+    this.initialChannelId,
+    this.initialChannelName,
+    this.initialCaraBayarName,
+    this.initialDateFrom,
+    this.initialDateTo,
+  });
 
   @override
   State<InvoiceListScreen> createState() => _InvoiceListScreenState();
@@ -33,11 +48,47 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   String? _selectedCaraBayar; // null = semua
   List<String> _caraBayarOptions = [];
 
+  // ── Filter channel ────────────────────────────────────────────
+  int? _selectedChannelId; // null = semua
+  String? _selectedChannelName;
+  List<Map<String, dynamic>> _channelOptions = []; // [{id, nama}]
+
+  // ── Filter search (baru) — cari no invoice / customer / kasir ──
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  // ── Pagination (baru) ────────────────────────────────────────
+  int _currentPage = 0; // 0-based
+  int _pageSize = 10;
+  static const List<int> _pageSizeOptions = [10, 25, 50, 100];
+
   List<Map<String, dynamic>> get _filteredInvoices {
-    if (_selectedCaraBayar == null) return _invoices;
-    return _invoices
-        .where((inv) => inv['cara_bayar'] == _selectedCaraBayar)
-        .toList();
+    final query = _searchQuery.trim().toLowerCase();
+    return _invoices.where((inv) {
+      final matchCaraBayar = _selectedCaraBayar == null ||
+          inv['cara_bayar'] == _selectedCaraBayar;
+      final matchChannel = _selectedChannelId == null ||
+          inv['channel_id'] == _selectedChannelId;
+      if (!matchCaraBayar || !matchChannel) return false;
+      if (query.isEmpty) return true;
+      final kode = (inv['kode'] ?? '').toString().toLowerCase();
+      final member = (inv['member'] ?? '').toString().toLowerCase();
+      final kasir = (inv['kasir'] ?? '').toString().toLowerCase();
+      return kode.contains(query) ||
+          member.contains(query) ||
+          kasir.contains(query);
+    }).toList();
+  }
+
+  // ── Slice halaman berjalan dari hasil filter ────────────────
+  List<Map<String, dynamic>> get _pagedInvoices {
+    final filtered = _filteredInvoices;
+    final start = _currentPage * _pageSize;
+    if (start >= filtered.length) return [];
+    final end = (start + _pageSize) > filtered.length
+        ? filtered.length
+        : start + _pageSize;
+    return filtered.sublist(start, end);
   }
 
   bool get _hasActiveFilter {
@@ -48,13 +99,38 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
         _dateTo.year == today.year &&
         _dateTo.month == today.month &&
         _dateTo.day == today.day;
-    return !isDefaultDate || _selectedCaraBayar != null;
+    return !isDefaultDate ||
+        _selectedCaraBayar != null ||
+        _selectedChannelId != null ||
+        _searchQuery.trim().isNotEmpty;
   }
 
   @override
   void initState() {
     super.initState();
+    // Terapkan filter awal (dari laporan Channel Terjual) sebelum load.
+    if (widget.initialDateFrom != null) _dateFrom = widget.initialDateFrom!;
+    if (widget.initialDateTo != null) _dateTo = widget.initialDateTo!;
+    if (widget.initialChannelId != null) {
+      _selectedChannelId = widget.initialChannelId;
+      _selectedChannelName = widget.initialChannelName;
+    }
+    if (widget.initialCaraBayarName != null) {
+      _selectedCaraBayar = widget.initialCaraBayarName;
+    }
+    _searchCtrl.addListener(() {
+      setState(() {
+        _searchQuery = _searchCtrl.text;
+        _currentPage = 0;
+      });
+    });
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -126,6 +202,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
     setState(() {
       _invoices = List<Map<String, dynamic>>.from(res.data['data']);
+      _currentPage = 0;
       // Rebuild unique cara_bayar list dari data baru
       final options = _invoices
           .map((inv) => (inv['cara_bayar'] ?? '').toString().trim())
@@ -138,6 +215,27 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       if (_selectedCaraBayar != null &&
           !_caraBayarOptions.contains(_selectedCaraBayar)) {
         _selectedCaraBayar = null;
+      }
+
+      // Rebuild unique channel list dari data baru (unik per channel_id)
+      final channelMap = <int, String>{};
+      for (final inv in _invoices) {
+        final id = inv['channel_id'] as int? ?? 0;
+        final nama = (inv['sales_tipe'] ?? '').toString().trim();
+        if (id > 0 && nama.isNotEmpty) channelMap[id] = nama;
+      }
+      _channelOptions = channelMap.entries
+          .map((e) => {'id': e.key, 'nama': e.value})
+          .toList()
+        ..sort((a, b) =>
+            (a['nama'] as String).compareTo(b['nama'] as String));
+      // Reset pilihan kalau sudah tidak ada di list baru
+      if (_selectedChannelId != null &&
+          !channelMap.containsKey(_selectedChannelId)) {
+        _selectedChannelId = null;
+        _selectedChannelName = null;
+      } else if (_selectedChannelId != null) {
+        _selectedChannelName = channelMap[_selectedChannelId];
       }
     });
   }
@@ -455,104 +553,6 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     }
   }
 
-  Future<void> _sendWA(Map<String, dynamic> invoice) async {
-    final telp = invoice['member_telp'] ?? '';
-    if (telp.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Member tidak punya nomor WA')),
-      );
-      return;
-    }
-
-    final dio = ApiService.getDio(token: _token);
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    try {
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'kirimWA',
-            'number': invoice['kode'],
-            'store_id': invoice['store_id'] ?? _activeStoreID,
-            'organisasi_id': _organisasiID,
-            'member_id': invoice['dim_bp_id'] ?? 0,
-          }));
-
-      if (mounted) Navigator.pop(context);
-
-      if (res.data['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('WA berhasil dikirim!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.data['message'] ?? 'Gagal kirim WA')),
-        );
-      }
-    } catch (e) {
-      if (mounted) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
-    }
-  }
-
-  Future<void> _sendEmail(Map<String, dynamic> invoice) async {
-    final email = invoice['member_email'] ?? '';
-    if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Member tidak punya email')),
-      );
-      return;
-    }
-
-    final dio = ApiService.getDio(token: _token);
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    try {
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'kirimEmail',
-            'number': invoice['kode'],
-            'store_id': invoice['store_id'] ?? _activeStoreID,
-            'organisasi_id': _organisasiID,
-            'member_id': invoice['dim_bp_id'] ?? 0,
-          }));
-
-      if (mounted) Navigator.pop(context);
-
-      if (res.data['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Email berhasil dikirim!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res.data['message'] ?? 'Gagal kirim email')),
-        );
-      }
-    } catch (e) {
-      if (mounted) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
-    }
-  }
-
   Future<void> _requestVoid(Map<String, dynamic> invoice) async {
     final TextEditingController notesCtrl = TextEditingController();
     final confirmed = await showDialog<bool>(
@@ -714,8 +714,95 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     if (picked == null) return;
     setState(() {
       _selectedCaraBayar = picked.isEmpty ? null : picked;
+      _currentPage = 0;
     });
   }
+
+  // ── Popup pilih channel ──────────────────────────────────────
+  Future<void> _pickChannel() async {
+    final picked = await showDialog<int?>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Filter Channel',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, -1), // -1 = "Semua"
+            child: Row(
+              children: [
+                Icon(Icons.all_inclusive,
+                    size: 18,
+                    color: _selectedChannelId == null
+                        ? const Color(0xFF1D273B)
+                        : Colors.grey),
+                const SizedBox(width: 10),
+                Text('Semua',
+                    style: TextStyle(
+                        fontWeight: _selectedChannelId == null
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: _selectedChannelId == null
+                            ? const Color(0xFF1D273B)
+                            : null)),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ..._channelOptions.map((ch) {
+            final id = ch['id'] as int;
+            final nama = ch['nama'] as String;
+            final selected = _selectedChannelId == id;
+            return SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, id),
+              child: Row(
+                children: [
+                  Icon(Icons.storefront_outlined,
+                      size: 18,
+                      color: selected ? const Color(0xFF1D273B) : Colors.grey),
+                  const SizedBox(width: 10),
+                  Text(nama,
+                      style: TextStyle(
+                          fontWeight:
+                              selected ? FontWeight.bold : FontWeight.normal,
+                          color: selected ? const Color(0xFF1D273B) : null)),
+                  if (selected) ...[
+                    const Spacer(),
+                    const Icon(Icons.check, size: 16, color: Color(0xFF1D273B)),
+                  ],
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+
+    if (picked == null) return;
+    setState(() {
+      if (picked == -1) {
+        _selectedChannelId = null;
+        _selectedChannelName = null;
+      } else {
+        _selectedChannelId = picked;
+        _selectedChannelName = _channelOptions
+            .firstWhere((c) => c['id'] == picked)['nama'] as String;
+      }
+      _currentPage = 0;
+    });
+  }
+
+  // ── Label gabungan "Channel - Cara Bayar" (mis. "TAKEAWAY - EDC") ─
+  String _channelCaraBayarLabel(Map<String, dynamic> inv) {
+    final channel = (inv['sales_tipe'] ?? '').toString().trim();
+    final caraBayar = (inv['cara_bayar'] ?? '').toString().trim();
+    if (channel.isEmpty && caraBayar.isEmpty) return '-';
+    if (channel.isEmpty) return caraBayar;
+    if (caraBayar.isEmpty) return channel;
+    return '$channel - $caraBayar';
+  }
+
+  String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
   // ── Reset semua filter ke default ───────────────────────────
   void _resetFilter() {
@@ -724,236 +811,710 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       _dateFrom = today;
       _dateTo = today;
       _selectedCaraBayar = null;
+      _selectedChannelId = null;
+      _selectedChannelName = null;
+      _searchCtrl.clear();
+      _searchQuery = '';
+      _currentPage = 0;
     });
     _loadInvoices();
   }
 
   @override
   Widget build(BuildContext context) {
+    final filtered = _filteredInvoices;
+    final paged = _pagedInvoices;
+    final totalSum =
+        filtered.fold(0.0, (sum, i) => sum + (i['total'] as num).toDouble());
+    final avgTransaksi = filtered.isEmpty ? 0.0 : totalSum / filtered.length;
+    final totalPages =
+        filtered.isEmpty ? 1 : ((filtered.length - 1) ~/ _pageSize) + 1;
+    final showingFrom = filtered.isEmpty ? 0 : _currentPage * _pageSize + 1;
+    final showingTo = filtered.isEmpty
+        ? 0
+        : (_currentPage * _pageSize + paged.length);
+
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF1D273B),
-        title: const Text('Invoice List',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          // Filter cara bayar
-          TextButton.icon(
-            onPressed: _caraBayarOptions.isEmpty ? null : _pickCaraBayar,
-            icon: Icon(
-              Icons.payment,
-              color: _selectedCaraBayar != null ? Colors.amber : Colors.white,
-              size: 18,
-            ),
-            label: Text(
-              _selectedCaraBayar ?? 'Cara Bayar',
-              style: TextStyle(
-                color: _selectedCaraBayar != null ? Colors.amber : Colors.white,
-                fontSize: 12,
-              ),
-            ),
-          ),
-          // Filter tanggal
-          TextButton.icon(
-            onPressed: _pickDateRange,
-            icon: const Icon(Icons.date_range, color: Colors.white, size: 18),
-            label: Text(
-              '${_dateFrom.toIso8601String().substring(0, 10)} s/d ${_dateTo.toIso8601String().substring(0, 10)}',
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-            ),
-          ),
-          // Reset — hanya muncul kalau ada filter aktif
-          if (_hasActiveFilter)
-            IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.amber),
-              tooltip: 'Reset Filter',
-              onPressed: _resetFilter,
-            ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _filteredInvoices.isEmpty
-              ? const Center(
-                  child: Text('Tidak ada transaksi',
-                      style: TextStyle(color: Colors.grey)))
-              : Column(
-                  children: [
-                    // Summary bar
-                    Container(
-                      color: const Color(0xFF1D273B),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${_filteredInvoices.length} transaksi',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                          Row(
+      backgroundColor: const Color(0xFFF4F6F9),
+      body: SafeArea(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  // ── Header navy ───────────────────────────────
+                  Container(
+                    color: const Color(0xFF1D273B),
+                    padding: const EdgeInsets.fromLTRB(12, 8, 16, 12),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  'Invoice: ${_filteredInvoices.length}',
-                                  style: const TextStyle(
-                                      color: Colors.white70, fontSize: 12),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                'Total: Rp ${CurrencyFormat.format(_filteredInvoices.fold(0.0, (sum, i) => sum + (i['total'] as num).toDouble()))}',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold),
-                              ),
+                              const Text('Invoice List',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold)),
+                              Text('Daftar transaksi penjualan',
+                                  style: TextStyle(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.6),
+                                      fontSize: 12)),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.refresh, color: Colors.white),
+                          tooltip: 'Refresh',
+                          onPressed: _loadInvoices,
+                        ),
+                      ],
                     ),
-                    // List
-                    Expanded(
-                      child: ListView.builder(
-                        padding: const EdgeInsets.all(8),
-                        itemCount: _filteredInvoices.length,
-                        itemBuilder: (_, i) {
-                          final inv = _filteredInvoices[i];
-                          return Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
-                                children: [
-                                  // Info
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        // Baris 1: kode invoice
-                                        Text(inv['kode'],
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 14)),
-                                        const SizedBox(height: 4),
-                                        // Baris 2: store badge (hanya muncul kalau multi-store)
-                                        if (_isMultiStore)
-                                          Container(
-                                            margin: const EdgeInsets.only(
-                                                bottom: 4),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 8, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF1D273B)
-                                                  .withValues(alpha: 0.08),
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              inv['store'] ?? '',
-                                              style: const TextStyle(
-                                                fontSize: 11,
-                                                color: Color(0xFF1D273B),
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        // Baris 3: member
-                                        Text(
-                                          inv['member']?.isNotEmpty == true
-                                              ? inv['member']
-                                              : 'Tanpa Member',
-                                          style: const TextStyle(
-                                              color: Colors.grey, fontSize: 12),
-                                        ),
-                                        // Baris 4: cara bayar + jam
-                                        Text(
-                                          '${inv['cara_bayar']?.isNotEmpty == true ? inv['cara_bayar'] : '-'}'
-                                          ' • '
-                                          '${inv['tanggal'].toString().length >= 16 ? inv['tanggal'].toString().substring(11, 16) : inv['tanggal'].toString()}',
-                                          style: const TextStyle(
-                                              color: Colors.grey, fontSize: 12),
-                                        ),
-                                        // Baris 5: kasir
-                                        if ((inv['kasir'] ?? '').isNotEmpty)
-                                          Text(
-                                            'Kasir: ${inv['kasir']}',
-                                            style: const TextStyle(
-                                                color: Colors.grey,
-                                                fontSize: 11),
-                                          ),
-                                      ],
-                                    ),
+                  ),
+
+                  // ── Konten putih ───────────────────────────────
+                  Expanded(
+                    child: filtered.isEmpty && !_hasActiveFilter
+                        ? const Center(
+                            child: Text('Tidak ada transaksi',
+                                style: TextStyle(color: Colors.grey)))
+                        : ListView(
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                              // Stat cards
+                              LayoutBuilder(builder: (ctx, constraints) {
+                                final isNarrow = constraints.maxWidth < 640;
+                                final cards = [
+                                  _statCard(
+                                    icon: Icons.shopping_cart_outlined,
+                                    iconBg: const Color(0xFF1D273B),
+                                    label: 'Total Penjualan',
+                                    value: 'Rp ${CurrencyFormat.format(totalSum)}',
                                   ),
-                                  // Total + actions
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                  _statCard(
+                                    icon: Icons.assignment_outlined,
+                                    iconBg: const Color(0xFF1D273B),
+                                    label: 'Total Invoice',
+                                    value: '${filtered.length}',
+                                    sub: 'Transaksi',
+                                  ),
+                                  _statCard(
+                                    icon: Icons.show_chart,
+                                    iconBg: const Color(0xFF1D273B),
+                                    label: 'Rata-rata Transaksi',
+                                    value: 'Rp ${CurrencyFormat.format(avgTransaksi)}',
+                                  ),
+                                  _statCard(
+                                    icon: Icons.replay_circle_filled_outlined,
+                                    iconBg: Colors.red.shade400,
+                                    label: 'Refund / Pembatalan',
+                                    value: 'Rp 0',
+                                    sub: '0 Transaksi',
+                                  ),
+                                ];
+                                if (isNarrow) {
+                                  return Column(
+                                    children: cards
+                                        .map((c) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                  bottom: 10),
+                                              child: c,
+                                            ))
+                                        .toList(),
+                                  );
+                                }
+                                return Row(
+                                  children: cards
+                                      .map((c) => Expanded(
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 5),
+                                              child: c,
+                                            ),
+                                          ))
+                                      .toList(),
+                                );
+                              }),
+                              const SizedBox(height: 16),
+
+                              // Search & filter row
+                              LayoutBuilder(builder: (ctx, constraints) {
+                                final isNarrow = constraints.maxWidth < 780;
+                                final searchField = _searchField();
+                                final dateBtn = _dropdownLikeButton(
+                                  icon: Icons.calendar_today,
+                                  label:
+                                      '${_fmtDate(_dateFrom)} - ${_fmtDate(_dateTo)}',
+                                  onTap: _pickDateRange,
+                                );
+                                final caraBayarBtn = _dropdownLikeButton(
+                                  icon: Icons.credit_card,
+                                  label: _selectedCaraBayar ?? 'Semua Cara Bayar',
+                                  onTap: _caraBayarOptions.isEmpty
+                                      ? null
+                                      : _pickCaraBayar,
+                                );
+                                final channelBtn = _dropdownLikeButton(
+                                  icon: Icons.storefront_outlined,
+                                  label: _selectedChannelName ?? 'Semua Channel',
+                                  onTap:
+                                      _channelOptions.isEmpty ? null : _pickChannel,
+                                );
+                                final filterBtn = ElevatedButton.icon(
+                                  onPressed: _loadInvoices,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF1D273B),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8)),
+                                  ),
+                                  icon: const Icon(Icons.filter_alt_outlined,
+                                      size: 16),
+                                  label: const Text('Filter'),
+                                );
+                                final resetBtn = OutlinedButton(
+                                  onPressed: _hasActiveFilter ? _resetFilter : null,
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFF1D273B),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8)),
+                                  ),
+                                  child: const Text('Reset'),
+                                );
+
+                                if (isNarrow) {
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
                                     children: [
-                                      Text(
-                                        'Rp ${CurrencyFormat.format(inv['total'])}',
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14),
-                                      ),
+                                      searchField,
+                                      const SizedBox(height: 8),
+                                      dateBtn,
+                                      const SizedBox(height: 8),
+                                      caraBayarBtn,
+                                      const SizedBox(height: 8),
+                                      channelBtn,
                                       const SizedBox(height: 8),
                                       Row(
                                         children: [
-                                          // Print — _handlePrint menangani FnB vs non-FnB
-                                          IconButton(
-                                            icon: const Icon(Icons.print,
-                                                color: Color(0xFF1D273B)),
-                                            tooltip: _isFnB
-                                                ? 'Print Ulang'
-                                                : 'Print',
-                                            onPressed: () => _handlePrint(inv),
-                                          ),
-                                          // WA
-                                          if ((inv['store_wa'] == 1) &&
-                                              (inv['member_telp'] ?? '')
-                                                  .isNotEmpty)
-                                            IconButton(
-                                              icon: const FaIcon(
-                                                  FontAwesomeIcons.whatsapp,
-                                                  color: Colors.green),
-                                              tooltip: 'Kirim WA',
-                                              onPressed: () => _sendWA(inv),
-                                            ),
-                                          // Email
-                                          if ((inv['member_email'] ?? '')
-                                              .isNotEmpty)
-                                            IconButton(
-                                              icon: const Icon(Icons.email,
-                                                  color: Colors.orange),
-                                              tooltip: 'Kirim Email',
-                                              onPressed: () => _sendEmail(inv),
-                                            ),
-                                          // Request Void
-                                          IconButton(
-                                            icon: const Icon(
-                                                Icons.cancel_outlined,
-                                                color: Colors.red),
-                                            tooltip: 'Request Void',
-                                            onPressed: () => _requestVoid(inv),
-                                          ),
+                                          Expanded(child: filterBtn),
+                                          const SizedBox(width: 8),
+                                          Expanded(child: resetBtn),
                                         ],
                                       ),
                                     ],
+                                  );
+                                }
+
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(flex: 3, child: searchField),
+                                    const SizedBox(width: 10),
+                                    Expanded(flex: 2, child: dateBtn),
+                                    const SizedBox(width: 10),
+                                    Expanded(flex: 2, child: caraBayarBtn),
+                                    const SizedBox(width: 10),
+                                    Expanded(flex: 2, child: channelBtn),
+                                    const SizedBox(width: 10),
+                                    filterBtn,
+                                    const SizedBox(width: 8),
+                                    resetBtn,
+                                  ],
+                                );
+                              }),
+
+                              // Active filter chips
+                              if (_hasActiveFilter) ...[
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    const Text('Filter aktif:',
+                                        style: TextStyle(
+                                            color: Colors.grey, fontSize: 13)),
+                                    _filterChip(
+                                      'Tanggal: ${_fmtDate(_dateFrom)}'
+                                      '${_dateFrom != _dateTo ? ' - ${_fmtDate(_dateTo)}' : ''}',
+                                      onRemove: () {
+                                        setState(() {
+                                          _dateFrom = DateTime.now();
+                                          _dateTo = DateTime.now();
+                                          _currentPage = 0;
+                                        });
+                                        _loadInvoices();
+                                      },
+                                    ),
+                                    _filterChip(
+                                      'Cara Bayar: ${_selectedCaraBayar ?? 'Semua'}',
+                                      onRemove: _selectedCaraBayar == null
+                                          ? null
+                                          : () => setState(() {
+                                                _selectedCaraBayar = null;
+                                                _currentPage = 0;
+                                              }),
+                                    ),
+                                    _filterChip(
+                                      'Channel: ${_selectedChannelName ?? 'Semua'}',
+                                      onRemove: _selectedChannelId == null
+                                          ? null
+                                          : () => setState(() {
+                                                _selectedChannelId = null;
+                                                _selectedChannelName = null;
+                                                _currentPage = 0;
+                                              }),
+                                    ),
+                                    if (_searchQuery.trim().isNotEmpty)
+                                      _filterChip(
+                                        'Cari: "${_searchQuery.trim()}"',
+                                        onRemove: () {
+                                          _searchCtrl.clear();
+                                        },
+                                      ),
+                                  ],
+                                ),
+                              ],
+
+                              const SizedBox(height: 16),
+
+                              // List
+                              if (filtered.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                  child: Center(
+                                    child: Text('Tidak ada transaksi yang cocok',
+                                        style: TextStyle(color: Colors.grey)),
                                   ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+                                )
+                              else
+                                ...paged.map((inv) => _invoiceRow(inv)),
+
+                              const SizedBox(height: 12),
+
+                              // Pagination
+                              if (filtered.isNotEmpty)
+                                LayoutBuilder(builder: (ctx, constraints) {
+                                  final isNarrow = constraints.maxWidth < 640;
+                                  final showingText = Text(
+                                    'Menampilkan $showingFrom - $showingTo dari ${filtered.length} transaksi',
+                                    style: const TextStyle(
+                                        color: Colors.grey, fontSize: 13),
+                                  );
+                                  final controls = Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _pageSizeDropdown(),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        icon: const Icon(Icons.chevron_left),
+                                        onPressed: _currentPage > 0
+                                            ? () => setState(
+                                                () => _currentPage--)
+                                            : null,
+                                      ),
+                                      Container(
+                                        width: 32,
+                                        height: 32,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF1D273B),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Text('${_currentPage + 1}',
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold)),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.chevron_right),
+                                        onPressed:
+                                            _currentPage + 1 < totalPages
+                                                ? () => setState(
+                                                    () => _currentPage++)
+                                                : null,
+                                      ),
+                                    ],
+                                  );
+                                  if (isNarrow) {
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        showingText,
+                                        const SizedBox(height: 8),
+                                        controls,
+                                      ],
+                                    );
+                                  }
+                                  return Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [showingText, controls],
+                                  );
+                                }),
+                            ],
+                          ),
+                  ),
+                ],
+              ),
+      ),
     );
   }
+
+  // ── Widget: stat card ─────────────────────────────────────────
+  Widget _statCard({
+    required IconData icon,
+    required Color iconBg,
+    required String label,
+    required String value,
+    String? sub,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: iconBg,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: TextStyle(
+                        color: Colors.grey.shade600, fontSize: 12)),
+                const SizedBox(height: 2),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1D273B)),
+                    overflow: TextOverflow.ellipsis),
+                if (sub != null)
+                  Text(sub,
+                      style: TextStyle(
+                          color: Colors.grey.shade500, fontSize: 11)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Widget: search field ────────────────────────────────────
+  Widget _searchField() {
+    return TextField(
+      controller: _searchCtrl,
+      decoration: InputDecoration(
+        hintText: 'Cari no invoice / customer / kasir',
+        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+        prefixIcon: Icon(Icons.search, color: Colors.grey.shade400, size: 20),
+        suffixIcon: _searchQuery.isEmpty
+            ? null
+            : IconButton(
+                icon: Icon(Icons.close, color: Colors.grey.shade400, size: 18),
+                onPressed: () => _searchCtrl.clear(),
+              ),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xFF1D273B)),
+        ),
+      ),
+    );
+  }
+
+  // ── Widget: tombol bergaya dropdown (buka dialog picker existing) ──
+  Widget _dropdownLikeButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: onTap == null ? Colors.grey.shade100 : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: Colors.grey.shade600),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.keyboard_arrow_down,
+                size: 18, color: Colors.grey.shade500),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Widget: chip filter aktif ───────────────────────────────
+  Widget _filterChip(String label, {VoidCallback? onRemove}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label,
+              style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
+          if (onRemove != null) ...[
+            const SizedBox(width: 6),
+            InkWell(
+              onTap: onRemove,
+              child: Icon(Icons.close, size: 14, color: Colors.grey.shade500),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Widget: dropdown jumlah per halaman ─────────────────────
+  Widget _pageSizeDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<int>(
+          value: _pageSize,
+          isDense: true,
+          items: _pageSizeOptions
+              .map((n) => DropdownMenuItem(
+                    value: n,
+                    child: Text('$n / halaman',
+                        style: const TextStyle(fontSize: 13)),
+                  ))
+              .toList(),
+          onChanged: (v) {
+            if (v == null) return;
+            setState(() {
+              _pageSize = v;
+              _currentPage = 0;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  // ── Widget: satu baris invoice (full width) ─────────────────
+  Widget _invoiceRow(Map<String, dynamic> inv) {
+    final jam = inv['created_date'] != null &&
+            inv['created_date'].toString().length >= 19
+        ? inv['created_date'].toString().substring(11, 19)
+        : (inv['created_date']?.toString().isNotEmpty == true
+            ? inv['created_date'].toString()
+            : '-');
+    final tanggalRaw = inv['tanggal']?.toString() ?? '';
+    String tanggalLabel = '';
+    if (tanggalRaw.length >= 10) {
+      final parts = tanggalRaw.substring(0, 10).split('-');
+      if (parts.length == 3) tanggalLabel = '${parts[2]}/${parts[1]}/${parts[0]}';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          // Icon
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1D273B),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.description_outlined,
+                color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 14),
+          // Kode + store
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(inv['kode'] ?? '',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Color(0xFF1D273B))),
+                const SizedBox(height: 2),
+                Text(inv['store'] ?? '',
+                    style: TextStyle(
+                        color: Colors.grey.shade600, fontSize: 12)),
+              ],
+            ),
+          ),
+          // Jam / tanggal
+          Expanded(
+            flex: 2,
+            child: Row(
+              children: [
+                Icon(Icons.access_time,
+                    size: 13, color: Colors.grey.shade400),
+                const SizedBox(width: 4),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(jam,
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600)),
+                    if (tanggalLabel.isNotEmpty)
+                      Text(tanggalLabel,
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey.shade500)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          // Channel - cara bayar sebagai badge tunggal + kasir
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(_channelCaraBayarLabel(inv),
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.deepPurple,
+                          fontWeight: FontWeight.w600)),
+                ),
+                if ((inv['kasir'] ?? '').toString().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text('Kasir: ${inv['kasir']}',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500)),
+                  ),
+              ],
+            ),
+          ),
+          // Total
+          Expanded(
+            flex: 2,
+            child: Text(
+              'Rp ${CurrencyFormat.format(inv['total'])}',
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Print button
+          _squareIconButton(
+            icon: Icons.print_outlined,
+            tooltip: _isFnB ? 'Print Ulang' : 'Print',
+            onPressed: () => _handlePrint(inv),
+          ),
+          const SizedBox(width: 8),
+          // Request Void
+          _squareIconButton(
+            icon: Icons.cancel_outlined,
+            tooltip: 'Request Void',
+            iconColor: Colors.red,
+            onPressed: () => _requestVoid(inv),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _squareIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    Color iconColor = const Color(0xFF1D273B),
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 36,
+          height: 36,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 18, color: iconColor),
+        ),
+      ),
+    );
+  }
+
 }

@@ -3,6 +3,48 @@
 // Behavior identik dengan versi monolitik sebelumnya.
 part of 'penjualan_screen.dart';
 
+// ============================================================
+// FORMATTER — thousand separator ("." ala format Rupiah) untuk
+// input modal kasir. Contoh: 100000 -> 100.000
+// ============================================================
+class _RibuanInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digitsOnly = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (digitsOnly.isEmpty) {
+      return newValue.copyWith(text: '');
+    }
+
+    final formatted = _formatRibuan(digitsOnly);
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+
+  static String _formatRibuan(String digits) {
+    final reversed = digits.split('').reversed.toList();
+    final buffer = StringBuffer();
+    for (int i = 0; i < reversed.length; i++) {
+      if (i != 0 && i % 3 == 0) buffer.write('.');
+      buffer.write(reversed[i]);
+    }
+    return buffer.toString().split('').reversed.join();
+  }
+}
+
+/// Helper untuk parse balik teks yang sudah diberi separator ribuan
+/// menjadi angka (double), dipakai sebelum kirim ke service.
+double _parseModalKasir(String text) {
+  final cleaned = text.replaceAll('.', '').replaceAll(',', '').trim();
+  return double.tryParse(cleaned) ?? 0;
+}
+
 extension PenjualanShiftX on _PenjualanScreenState {
   void _startShiftPolling() {
     _shiftPollingTimer?.cancel();
@@ -92,6 +134,10 @@ extension PenjualanShiftX on _PenjualanScreenState {
               controller: modalController,
               keyboardType: TextInputType.number,
               autofocus: true,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                _RibuanInputFormatter(),
+              ],
               decoration: const InputDecoration(
                 labelText: 'Modal Kasir',
                 border: OutlineInputBorder(),
@@ -121,8 +167,7 @@ extension PenjualanShiftX on _PenjualanScreenState {
 
     if (confirm != true) return 0;
 
-    final modal =
-        double.tryParse(modalController.text.replaceAll(',', '').trim()) ?? 0;
+    final modal = _parseModalKasir(modalController.text);
 
     final shiftID = await ShiftService.bukaShift(
       token: _token,
@@ -238,6 +283,10 @@ extension PenjualanShiftX on _PenjualanScreenState {
                 controller: modalController,
                 keyboardType: TextInputType.number,
                 autofocus: false,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  _RibuanInputFormatter(),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'Modal Kasir',
                   border: OutlineInputBorder(),

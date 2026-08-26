@@ -647,6 +647,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                     DropdownMenuItem(
                         value: 'adjust', child: Text('Update Selisih')),
                     DropdownMenuItem(value: 'count', child: Text('Set Total')),
+                    DropdownMenuItem(
+                        value: 'countAll', child: Text('Stock Opname')),
                   ],
                   onChanged: (val) {
                     if (val != null) setState(() => _tipe = val);

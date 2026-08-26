@@ -149,6 +149,19 @@ extension PenjualanCartWidgetsX on _PenjualanScreenState {
                                 });
                               },
                             ),
+                            // Edit pilihan package — HANYA untuk item
+                            // package. Single item tidak butuh edit
+                            // karena tidak ada isian/addon untuk diganti.
+                            if (item.isPackage)
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.tune,
+                                  color: Colors.indigo,
+                                  size: 20,
+                                ),
+                                tooltip: 'Edit pilihan package',
+                                onPressed: () => _editPackageItem(i),
+                              ),
                             IconButton(
                               icon: const Icon(
                                 Icons.delete,

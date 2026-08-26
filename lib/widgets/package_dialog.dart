@@ -34,6 +34,18 @@ class PackageDialog extends StatefulWidget {
   final String sku;
   final Map<String, dynamic> packageData;
 
+  /// Prefill untuk mode EDIT — id isian/addon yang sebelumnya sudah
+  /// dipilih kasir untuk item ini. Kosong (default) = mode insert baru,
+  /// dialog terbuka tanpa ada yang tercentang seperti biasa.
+  final Set<int> initialSelectedIsianIds;
+  final Set<int> initialSelectedAddonIds;
+  final String initialKeterangan;
+
+  /// Mode edit — kalau true, header & footer dialog dikasih label
+  /// "Edit" alih-alih "Tambah ke Order" supaya kasir tidak bingung
+  /// item ini sebenarnya sudah ada di cart, bukan mau ditambah baru.
+  final bool isEditMode;
+
   /// Callback setelah user konfirmasi.
   /// [isianDipilih]  — list of { 'id': int, 'nama': String }
   /// [addonDipilih]  — list of { 'id': int, 'nama': String, 'harga': double }
@@ -51,6 +63,10 @@ class PackageDialog extends StatefulWidget {
     required this.sku,
     required this.packageData,
     required this.onConfirm,
+    this.initialSelectedIsianIds = const {},
+    this.initialSelectedAddonIds = const {},
+    this.initialKeterangan = '',
+    this.isEditMode = false,
   });
 
   @override
@@ -79,6 +95,40 @@ class _PackageDialogState extends State<PackageDialog> {
   void initState() {
     super.initState();
     _cachedAddonGroups = _parseAddonGroups();
+    _applyInitialSelection();
+  }
+
+  /// Terapkan pilihan sebelumnya (mode edit) ke state seleksi.
+  /// Isian: langsung masuk _selectedIsian (checkbox, tidak perlu tahu grup).
+  /// Addon: perlu dicocokkan ke grup asalnya dulu, supaya tahu harus
+  /// masuk _selectedSingle (radio) atau _selectedMultiple (checkbox) —
+  /// packages_notes tidak menyimpan info grup, makanya dicari balik
+  /// dari _cachedAddonGroups berdasarkan id.
+  void _applyInitialSelection() {
+    if (widget.initialSelectedIsianIds.isNotEmpty) {
+      _selectedIsian.addAll(widget.initialSelectedIsianIds);
+    }
+
+    if (widget.initialSelectedAddonIds.isNotEmpty) {
+      _cachedAddonGroups.forEach((grupKey, grupData) {
+        final items = (grupData['items'] as List?) ?? [];
+        final tipe = (grupData['tipe_pilihan'] as String?) ?? 'multiple';
+        for (final item in items) {
+          final id = item['m_package_addon_id'] as int;
+          if (widget.initialSelectedAddonIds.contains(id)) {
+            if (tipe == 'single') {
+              _selectedSingle[grupKey] = id;
+            } else {
+              _selectedMultiple.add(id);
+            }
+          }
+        }
+      });
+    }
+
+    if (widget.initialKeterangan.isNotEmpty) {
+      _keteranganCtrl.text = widget.initialKeterangan;
+    }
   }
 
   // ── Helpers ─────────────────────────────────────────────────
@@ -330,13 +380,37 @@ class _PackageDialogState extends State<PackageDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            widget.packageData['nama'] ?? 'Produk Package',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.packageData['nama'] ?? 'Produk Package',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              if (widget.isEditMode)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    'EDIT',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 2),
           Text(
@@ -769,8 +843,15 @@ class _PackageDialogState extends State<PackageDialog> {
             flex: 2,
             child: ElevatedButton.icon(
               onPressed: canConfirm ? _onConfirm : null,
-              icon: const Icon(Icons.add_shopping_cart, size: 18),
-              label: const Text('Tambah ke Order'),
+              icon: Icon(
+                widget.isEditMode
+                    ? Icons.check_circle_outline
+                    : Icons.add_shopping_cart,
+                size: 18,
+              ),
+              label: Text(
+                widget.isEditMode ? 'Simpan Perubahan' : 'Tambah ke Order',
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor:
                     canConfirm ? const Color(0xFF1D273B) : Colors.grey.shade400,

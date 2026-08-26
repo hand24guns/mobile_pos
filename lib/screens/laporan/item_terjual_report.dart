@@ -170,7 +170,8 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
   String _formatDate(DateTime d) =>
       '${d.year}-${_twoDigits(d.month)}-${_twoDigits(d.day)}';
 
-  String _formatDateShort(DateTime d) => '${_twoDigits(d.day)}/${_twoDigits(d.month)}';
+  String _formatDateShort(DateTime d) =>
+      '${_twoDigits(d.day)}/${_twoDigits(d.month)}';
 
   String _formatNumber(num val) {
     return val.toStringAsFixed(0).replaceAllMapped(
@@ -229,10 +230,7 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (compact)
-              _buildCompactToolbar()
-            else
-              _buildPortraitHeader(),
+            if (compact) _buildCompactToolbar() else _buildPortraitHeader(),
             Expanded(child: _buildBody(compact: compact)),
           ],
         ),
@@ -423,7 +421,8 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
                 const SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: _blue),
+                  child:
+                      CircularProgressIndicator(strokeWidth: 2, color: _blue),
                 ),
               ],
             ],
@@ -590,7 +589,8 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
             const SizedBox(height: 8),
             Text(_error!, style: TextStyle(color: Colors.grey[600])),
             const SizedBox(height: 12),
-            TextButton(onPressed: _loadItemTerjual, child: const Text('Coba Lagi')),
+            TextButton(
+                onPressed: _loadItemTerjual, child: const Text('Coba Lagi')),
           ],
         ),
       );
@@ -629,83 +629,74 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
     return RefreshIndicator(
       color: _blue,
       onRefresh: _loadItemTerjual,
-      child: Padding(
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.all(compact ? 8 : 16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(compact ? 8 : 12),
-            border: Border.all(color: Colors.grey.shade200),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              _buildTableHeader(compact),
-              Expanded(
-                child: ListView.separated(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, __) =>
-                      Divider(height: 1, color: Colors.grey.shade200),
-                  itemBuilder: (context, i) =>
-                      _buildTableRow(filtered[i] as Map<String, dynamic>, i, compact),
-                ),
-              ),
-            ],
-          ),
-        ),
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => SizedBox(height: compact ? 6 : 10),
+        itemBuilder: (context, i) =>
+            _buildRowCard(filtered[i] as Map<String, dynamic>, i, compact),
       ),
     );
   }
 
-  // Kolom: No / Produk (nama + kode di bawahnya) / Qty / Netto.
-  static const double _noColWidth = 28;
-  static const double _qtyColWidth = 64;
-  static const double _nettoColWidth = 110;
+  // ── Warna aksen per baris (rotasi), sama seperti pola di
+  // LaporanPembayaranScreen / ChannelTerjualReportScreen — biar
+  // tampilan tabel konsisten di semua laporan.
+  Color _rowAccent(int index) {
+    const colors = [
+      Color(0xFF2563EB),
+      Color(0xFF22C55E),
+      Color(0xFFF59E0B),
+      Color(0xFFEC4899),
+      Color(0xFF7C3AED),
+      Color(0xFF06B6D4),
+      Color(0xFFEF4444),
+    ];
+    return colors[index % colors.length];
+  }
 
-  Widget _buildTableHeader(bool compact) {
-    final style = TextStyle(
-      color: Colors.white,
-      fontWeight: FontWeight.w600,
-      fontSize: compact ? 12.5 : 13.5,
-    );
+  Widget _buildRowCard(Map<String, dynamic> item, int i, bool compact) {
+    final nama = '${item['nama'] ?? ''}';
+    final kode = '${item['kode'] ?? ''}';
+    final qty = (item['qty'] as num?) ?? 0;
+    final netto = (item['netto'] as num?) ?? 0;
+    final accent = _rowAccent(i);
+
     return Container(
-      color: _navy,
-      padding: EdgeInsets.symmetric(
-          horizontal: compact ? 12 : 16, vertical: compact ? 10 : 12),
-      child: Row(
-        children: [
-          SizedBox(width: _noColWidth, child: Text('No', style: style)),
-          Expanded(child: Text('Produk', style: style)),
-          SizedBox(
-            width: _qtyColWidth,
-            child: Text('Qty', style: style, textAlign: TextAlign.right),
-          ),
-          SizedBox(
-            width: _nettoColWidth,
-            child: Text('Netto', style: style, textAlign: TextAlign.right),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildTableRow(Map<String, dynamic> item, int i, bool compact) {
-    final nama = '${item['nama'] ?? ''}';
-    final kode = '${item['kode'] ?? ''}';
-    final fontSize = compact ? 12.5 : 14.0;
-
-    return Container(
-      color: Colors.white,
-      padding: EdgeInsets.symmetric(
-          horizontal: compact ? 12 : 16, vertical: compact ? 9 : 12),
+      padding:
+          EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 10 : 12),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          SizedBox(
-            width: _noColWidth,
-            child: Text('${i + 1}',
-                style: TextStyle(fontSize: fontSize, color: Colors.grey[700])),
+          // Nomor
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '${i + 1}',
+                style: TextStyle(
+                    color: accent, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
           ),
+          const SizedBox(width: 10),
+          // Nama + kode produk
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -715,8 +706,8 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
                   nama,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: fontSize, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15, color: _navy),
                 ),
                 if (kode.isNotEmpty) ...[
                   const SizedBox(height: 2),
@@ -724,30 +715,30 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
                     kode,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: fontSize - 2, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
                   ),
                 ],
               ],
             ),
           ),
-          SizedBox(
-            width: _qtyColWidth,
+          // Badge qty
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: Text(
-              _formatNumber((item['qty'] as num?) ?? 0),
-              textAlign: TextAlign.right,
+              '${_formatNumber(qty)} qty',
               style: TextStyle(
-                  color: _green, fontWeight: FontWeight.w700, fontSize: fontSize),
+                  color: accent, fontWeight: FontWeight.w600, fontSize: 11),
             ),
           ),
-          SizedBox(
-            width: _nettoColWidth,
-            child: Text(
-              _formatCurrency((item['netto'] as num?) ?? 0),
-              textAlign: TextAlign.right,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Colors.grey[700], fontSize: fontSize - 1),
-            ),
+          const SizedBox(width: 10),
+          Text(
+            _formatCurrency(netto),
+            style: const TextStyle(
+                color: _navy, fontWeight: FontWeight.bold, fontSize: 14),
           ),
         ],
       ),
@@ -775,7 +766,7 @@ class _MiniStat extends StatelessWidget {
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -816,7 +807,7 @@ class _HeaderStat extends StatelessWidget {
       width: fullWidth ? double.infinity : null,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(

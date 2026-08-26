@@ -283,13 +283,25 @@ extension PenjualanDataX on _PenjualanScreenState {
       caraBayarRes.data['data'] ?? [],
     );
 
+    // Channel awal = yang is_default = 1. Backend (getChannels) memang
+    // sudah ORDER BY is_default DESC jadi selama ini _channels.first
+    // "kebetulan" selalu default — di sini dibuat eksplisit supaya tidak
+    // diam-diam salah kalau urutan query backend berubah suatu saat,
+    // dengan fallback ke channel pertama kalau tidak ada is_default = 1.
+    final defaultChannel = _channels.isNotEmpty
+        ? _channels.firstWhere(
+            (c) => c['is_default'].toString() == '1',
+            orElse: () => _channels.first,
+          )
+        : null;
+
     ref.read(penjualanProvider.notifier).setInitialData(
           number: number,
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID: _channels.isNotEmpty
-              ? int.parse(_channels.first['dim_salestipe_id'].toString())
+          salesTipeID: defaultChannel != null
+              ? int.parse(defaultChannel['dim_salestipe_id'].toString())
               : 0,
         );
 

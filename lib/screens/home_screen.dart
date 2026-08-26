@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../services/session_service.dart';
 import '../services/api_service.dart';
+import '../utils/printer_helper.dart'; // TODO: sesuaikan path ini dengan lokasi printer_helper.dart di project-mu
 import 'penjualan/penjualan_screen.dart';
 import 'invoice_list_screen.dart';
 import 'laporan_pembayaran_screen.dart';
@@ -38,7 +39,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Dashboard stats
   int _invoiceHariIni = 0;
   double _totalPenjualan = 0;
-  final bool _printerConnected = false;
+  bool _printerConnected = false;
   bool _isLoading = false;
   List<int> _outlets = [];
   List<String> _menus = [];
@@ -48,10 +49,150 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // dengan path yang dipakai sidebar.php versi web).
   static const String _menuPathAdjustment = 'penyesuaian/Adjustment';
 
+  // ── Tooltip "Ubah Password" di header ─────────────────────
+  // LayerLink menghubungkan posisi tooltip (OverlayEntry) dengan
+  // posisi baris username di header, supaya tooltip muncul persis
+  // di bawah nama user terlepas dari ukuran layar.
+  final LayerLink _userInfoLink = LayerLink();
+  OverlayEntry? _passwordTooltipEntry;
+
   @override
   void initState() {
     super.initState();
     _loadSession(); // _loadStats() dipanggil di dalam _loadSession setelah session siap
+    _checkPrinterStatus(); // cek sekali saat home screen pertama kali dibuka
+  }
+
+  @override
+  void dispose() {
+    _removePasswordTooltip();
+    super.dispose();
+  }
+
+  // ── Tooltip "Ubah Password" ───────────────────────────────
+  // Tap 1x di baris username -> muncul tooltip kecil "Ubah Password".
+  // Tap lagi di tooltip itu -> tooltip hilang & dialog ubah password terbuka.
+  // Tap di luar tooltip -> tooltip hilang begitu saja.
+  void _toggleUserTooltip() {
+    if (_passwordTooltipEntry != null) {
+      _removePasswordTooltip();
+      return;
+    }
+    final overlay = Overlay.of(context);
+    _passwordTooltipEntry = OverlayEntry(
+      builder: (_) => Stack(
+        children: [
+          // Barrier transparan supaya tap di luar tooltip menutupnya
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _removePasswordTooltip,
+            ),
+          ),
+          CompositedTransformFollower(
+            link: _userInfoLink,
+            showWhenUnlinked: false,
+            offset: const Offset(0, 22),
+            child: Material(
+              color: Colors.transparent,
+              child: GestureDetector(
+                onTap: () {
+                  _removePasswordTooltip();
+                  _openChangePasswordDialog();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _navyMid,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.15),
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black38,
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.lock_reset_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        'Ubah Password',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    overlay.insert(_passwordTooltipEntry!);
+  }
+
+  void _removePasswordTooltip() {
+    _passwordTooltipEntry?.remove();
+    _passwordTooltipEntry = null;
+  }
+
+  void _openChangePasswordDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => _ChangePasswordDialog(
+        nama: _nama.isNotEmpty ? _nama : _username,
+      ),
+    );
+  }
+
+  // ── Cek status koneksi printer & update card ─────────────────
+  // Dipanggil saat home screen pertama dibuka, dan setiap kali user
+  // kembali dari modul lain (lihat _pushAndRecheckPrinter). Tidak
+  // polling terus-menerus karena card status printer memang cuma
+  // terlihat di home screen.
+  Future<void> _checkPrinterStatus() async {
+    try {
+      final connected = await PrinterHelper.isConnected();
+      if (!mounted) return;
+      if (connected != _printerConnected) {
+        setState(() => _printerConnected = connected);
+      }
+    } catch (_) {
+      // Gagal cek (mis. bluetooth adapter error) — anggap disconnected
+      if (!mounted) return;
+      if (_printerConnected) {
+        setState(() => _printerConnected = false);
+      }
+    }
+  }
+
+  // ── Push ke modul lain, lalu re-check status printer saat balik ──
+  // Menggantikan Navigator.push biasa untuk semua tile/tombol yang
+  // bisa mempengaruhi status printer (Penjualan, Invoice, Printer
+  // settings, dll) — begitu route di atasnya di-pop, kita langsung
+  // cek ulang PrinterHelper.isConnected() supaya card update tanpa
+  // perlu polling berkala.
+  Future<void> _pushAndRecheckPrinter(Widget screen) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+    if (!mounted) return;
+    _checkPrinterStatus();
   }
 
   Future<void> _loadSession() async {
@@ -336,22 +477,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     if (_username.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.person_outline,
-                            color: Colors.white54,
-                            size: 13,
+                      CompositedTransformTarget(
+                        link: _userInfoLink,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _toggleUserTooltip,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.person_outline,
+                                color: Colors.white54,
+                                size: 13,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'User: $_username',
+                                style: TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: isTablet ? 12 : 11,
+                                  decoration: TextDecoration.underline,
+                                  decorationColor: Colors.white38,
+                                  decorationStyle: TextDecorationStyle.dotted,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'User: $_username',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: isTablet ? 12 : 11,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ],
                   ],
@@ -361,10 +513,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               _HeaderIconBtn(
                 icon: Icons.print_rounded,
                 label: 'Printer',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const PrinterScreen()),
-                ),
+                onTap: () => _pushAndRecheckPrinter(const PrinterScreen()),
                 isTablet: isTablet,
               ),
               const SizedBox(width: 8),
@@ -450,11 +599,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         compact: compact,
                         enabled: _hasStoreAccess,
                         onTap: _hasStoreAccess
-                            ? () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const PenjualanScreen(),
-                                  ),
+                            ? () => _pushAndRecheckPrinter(
+                                  const PenjualanScreen(),
                                 )
                             : _showNoStoreAccessWarning,
                       ),
@@ -466,11 +612,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         label: 'INVOICE',
                         description: 'Riwayat transaksi & cetak ulang invoice',
                         compact: compact,
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const InvoiceListScreen(),
-                          ),
+                        onTap: () => _pushAndRecheckPrinter(
+                          const InvoiceListScreen(),
                         ),
                       ),
                     ),
@@ -1005,6 +1148,218 @@ class _BottomNavItem extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ============================================================
+// WIDGET: _ChangePasswordDialog
+// ============================================================
+// Popup ubah password: nama (info saja), password baru (dengan
+// toggle mata/masking), dan ulangi password. Tombol "Simpan" baru
+// aktif kalau password & ulangi password terisi, sama persis, dan
+// memenuhi panjang minimal.
+class _ChangePasswordDialog extends StatefulWidget {
+  final String nama;
+
+  const _ChangePasswordDialog({required this.nama});
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _passwordCtrl = TextEditingController();
+  final _rePasswordCtrl = TextEditingController();
+
+  bool _obscurePassword = true;
+  bool _obscureRePassword = true;
+  bool _isSaving = false;
+  String? _errorText;
+
+  bool get _passwordsMatch =>
+      _rePasswordCtrl.text.isEmpty ||
+      _passwordCtrl.text == _rePasswordCtrl.text;
+
+  bool get _isValid {
+    final p = _passwordCtrl.text;
+    final rp = _rePasswordCtrl.text;
+    return p.isNotEmpty && p == rp;
+  }
+
+  @override
+  void dispose() {
+    _passwordCtrl.dispose();
+    _rePasswordCtrl.dispose();
+    super.dispose();
+  }
+
+  // Dikirim ke penjualan.php (bukan auth.php) karena di sinilah
+  // validateToken() sudah dijalankan dan $userID di-resolve dari
+  // token — persis pola yang dipakai semua action lain
+  // (CartHandler, MasterHandler, dst). Handler-nya ada di
+  // MasterHandler.php, action 'changePassword'.
+  Future<void> _submit() async {
+    if (!_isValid || _isSaving) return;
+    setState(() {
+      _isSaving = true;
+      _errorText = null;
+    });
+
+    try {
+      final session = await SessionService.getSession();
+      final token = session['token'] ?? '';
+
+      final response = await http.post(
+        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: {
+          'action': 'changePassword',
+          'password': _passwordCtrl.text,
+          'password_confirmation': _rePasswordCtrl.text,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (!mounted) return;
+
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Password berhasil diubah')),
+        );
+      } else {
+        setState(() {
+          _errorText = data['message'] ?? 'Gagal mengubah password';
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errorText = 'Gagal terhubung ke server');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text('Ubah Password'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Nama user — info saja, tidak bisa diedit
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.person_outline,
+                    size: 18,
+                    color: Colors.grey,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      widget.nama,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Password baru
+            TextField(
+              controller: _passwordCtrl,
+              obscureText: _obscurePassword,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Password Baru',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+
+            // Ulangi password
+            TextField(
+              controller: _rePasswordCtrl,
+              obscureText: _obscureRePassword,
+              decoration: InputDecoration(
+                labelText: 'Ulangi Password',
+                border: const OutlineInputBorder(),
+                errorText: _passwordsMatch ? null : 'Password tidak sama',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureRePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                  onPressed: () => setState(
+                    () => _obscureRePassword = !_obscureRePassword,
+                  ),
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+
+            if (_errorText != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _errorText!,
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+        ElevatedButton(
+          onPressed: (_isValid && !_isSaving) ? _submit : null,
+          style: ElevatedButton.styleFrom(backgroundColor: _navy),
+          child: _isSaving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text('Simpan', style: TextStyle(color: Colors.white)),
+        ),
+      ],
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'session_service.dart';
 
@@ -85,11 +86,18 @@ class ApiService {
 
     final dio = Dio(options);
 
-    // Interceptor untuk debug
-    dio.interceptors.add(LogInterceptor(
-      requestHeader: true,
-      responseBody: true,
-    ));
+    // Interceptor untuk debug — HANYA aktif di debug build, supaya
+    // response.body (yang berisi token saat login) dan header lain
+    // tidak pernah ke-print di build release / production.
+    // requestHeader sengaja dimatikan juga: kalau dinyalakan, dia
+    // akan nge-print header "Authorization: Bearer <token>" di
+    // setiap request setelah login, bukan cuma saat login.
+    if (kDebugMode) {
+      dio.interceptors.add(LogInterceptor(
+        requestHeader: false,
+        responseBody: true,
+      ));
+    }
 
     return dio;
   }

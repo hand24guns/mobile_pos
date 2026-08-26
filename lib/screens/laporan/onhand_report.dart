@@ -531,83 +531,77 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
     return RefreshIndicator(
       color: _blue,
       onRefresh: _loadOnhand,
-      child: Padding(
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.all(compact ? 8 : 16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(compact ? 8 : 12),
-            border: Border.all(color: Colors.grey.shade200),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              _buildTableHeader(compact),
-              Expanded(
-                child: ListView.separated(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, __) =>
-                      Divider(height: 1, color: Colors.grey.shade200),
-                  itemBuilder: (context, i) => _buildTableRow(
-                      filtered[i] as Map<String, dynamic>, i, compact),
-                ),
-              ),
-            ],
-          ),
-        ),
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => SizedBox(height: compact ? 6 : 10),
+        itemBuilder: (context, i) =>
+            _buildRowCard(filtered[i] as Map<String, dynamic>, i, compact),
       ),
     );
   }
 
-  // Kolom disederhanakan untuk portrait: No / Produk (nama + kode di
-  // bawahnya) / Qty. Lebar No & Qty tetap, Produk mengisi sisa ruang.
-  static const double _noColWidth = 28;
-  static const double _qtyColWidth = 76;
-
-  Widget _buildTableHeader(bool compact) {
-    final style = TextStyle(
-      color: Colors.white,
-      fontWeight: FontWeight.w600,
-      fontSize: compact ? 12.5 : 13.5,
-    );
-    return Container(
-      color: _navy,
-      padding: EdgeInsets.symmetric(
-          horizontal: compact ? 12 : 16, vertical: compact ? 10 : 12),
-      child: Row(
-        children: [
-          SizedBox(width: _noColWidth, child: Text('No', style: style)),
-          Expanded(child: Text('Produk', style: style)),
-          SizedBox(
-            width: _qtyColWidth,
-            child: Text('Qty', style: style, textAlign: TextAlign.right),
-          ),
-        ],
-      ),
-    );
+  // ── Warna aksen per baris (rotasi), sama seperti pola di
+  // LaporanPembayaranScreen / ChannelTerjualReportScreen / ItemTerjualReportScreen
+  // — biar tampilan tabel konsisten di semua laporan.
+  Color _rowAccent(int index) {
+    const colors = [
+      Color(0xFF2563EB),
+      Color(0xFF22C55E),
+      Color(0xFFF59E0B),
+      Color(0xFFEC4899),
+      Color(0xFF7C3AED),
+      Color(0xFF06B6D4),
+      Color(0xFFEF4444),
+    ];
+    return colors[index % colors.length];
   }
 
-  Widget _buildTableRow(Map<String, dynamic> item, int i, bool compact) {
+  Widget _buildRowCard(Map<String, dynamic> item, int i, bool compact) {
     final namaGabungan = [
       item['nama'],
       item['warna'],
       item['size'],
     ].where((e) => (e ?? '').toString().isNotEmpty).join(' - ');
     final kode = '${item['kode'] ?? ''}';
-    final fontSize = compact ? 12.5 : 14.0;
+    final qty = (item['qty'] as num?) ?? 0;
+    final accent = _rowAccent(i);
 
     return Container(
-      color: Colors.white,
-      padding: EdgeInsets.symmetric(
-          horizontal: compact ? 12 : 16, vertical: compact ? 9 : 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: _noColWidth,
-            child: Text('${i + 1}',
-                style: TextStyle(fontSize: fontSize, color: Colors.grey[700])),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
+        ],
+      ),
+      padding:
+          EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 10 : 12),
+      child: Row(
+        children: [
+          // Nomor
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '${i + 1}',
+                style: TextStyle(
+                    color: accent, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Nama + warna/size + kode produk
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -617,8 +611,8 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
                   namaGabungan,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: fontSize, fontWeight: FontWeight.w500),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15, color: _navy),
                 ),
                 if (kode.isNotEmpty) ...[
                   const SizedBox(height: 2),
@@ -626,22 +620,24 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
                     kode,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: fontSize - 2, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
                   ),
                 ],
               ],
             ),
           ),
-          SizedBox(
-            width: _qtyColWidth,
+          const SizedBox(width: 10),
+          // Badge qty
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: Text(
-              _formatNumber((item['qty'] as num?) ?? 0),
-              textAlign: TextAlign.right,
+              '${_formatNumber(qty)} qty',
               style: TextStyle(
-                  color: _green,
-                  fontWeight: FontWeight.w700,
-                  fontSize: fontSize),
+                  color: accent, fontWeight: FontWeight.w600, fontSize: 11),
             ),
           ),
         ],

@@ -10,6 +10,7 @@ import '../../services/session_service.dart';
 import '../../services/shift_service.dart';
 import '../../models/cart_item.dart';
 import '../../utils/currency_format.dart';
+import '../../utils/currency_input_formatter.dart';
 import '../login_screen.dart';
 import '../home_screen.dart';
 import '../printer_screen.dart';
@@ -478,10 +479,7 @@ class _BukaShiftButtonState extends State<_BukaShiftButton> {
   Future<void> _handleTap() async {
     setState(() => _isLoading = true);
 
-    final modal = double.tryParse(
-          widget.modalController.text.replaceAll(',', '').trim(),
-        ) ??
-        0;
+    final modal = _parseModalKasir(widget.modalController.text);
 
     final shiftID = await ShiftService.bukaShift(
       token: widget.token,

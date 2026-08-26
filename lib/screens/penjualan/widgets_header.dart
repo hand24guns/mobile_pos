@@ -112,6 +112,9 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
           DropdownButtonFormField<int>(
             initialValue: state.salesTipeID,
             decoration: inputDeco.copyWith(hintText: 'Channel'),
+            // Backend (getChannels) sudah ORDER BY is_default DESC, nama ASC
+            // jadi channel default otomatis berada di posisi pertama list —
+            // tanpa perlu penanda visual tambahan, tampil apa adanya dari DB.
             items: _channels.map((c) {
               return DropdownMenuItem<int>(
                 value: int.parse(c['dim_salestipe_id'].toString()),
@@ -385,6 +388,8 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                     color: Colors.black87,
                   ),
                   isDense: true,
+                  // Sama seperti header full: urutan sudah dijamin backend
+                  // (is_default DESC, nama ASC), tampil apa adanya dari DB.
                   items: _channels.map((c) {
                     return DropdownMenuItem<int>(
                       value: int.parse(c['dim_salestipe_id'].toString()),
