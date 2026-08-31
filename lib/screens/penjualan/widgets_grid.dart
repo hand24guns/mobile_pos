@@ -182,6 +182,54 @@ extension PenjualanGridWidgetsX on _PenjualanScreenState {
     );
   }
 
+  // ============================================================
+  // TINGGI MAKSIMUM IMAGE GRID — khusus layout PORTRAIT (stacked).
+  //
+  // Dipanggil dari _buildStackedLayout (widgets_summary.dart) untuk
+  // membatasi image grid maksimal 2 baris produk, supaya panel cart
+  // di bawahnya (sebelumnya sering cuma kebagian 1 row) dapat ruang
+  // yang lebih besar. TIDAK dipakai di landscape (_buildSideBySideLayout
+  // tetap Expanded penuh seperti sebelumnya).
+  //
+  // PENTING: rumus cell di bawah ini SENGAJA disalin persis dari
+  // _buildProductGrid supaya tinggi yang dihitung di sini konsisten
+  // dengan tinggi cell yang benar-benar dirender oleh GridView. Kalau
+  // konstanta/rumus di _buildProductGrid berubah, sesuaikan juga di sini.
+  // ============================================================
+  double _stackedImageGridMaxHeight(double totalWidth) {
+    const int visibleRows = 2;
+
+    final double gridPadding = _isTinyTablet ? 4 : 10;
+    final double spacing = _isTinyTablet ? 4 : 10;
+    final int columns = _gridColumns;
+
+    final double nameFontSize = _isTinyTablet ? 10.0 : 12;
+    final double priceFontSize = _isTinyTablet ? 10.0 : 12;
+    final double textVerticalPadding = _isTinyTablet ? 4 : 10;
+    const double textGap = 2;
+    const double safetyBuffer = 2;
+    final int nameMaxLines = _isTinyTablet ? 1 : 2;
+
+    final double cellWidth = (totalWidth -
+            (gridPadding * 2) -
+            (spacing * (columns - 1))) /
+        columns;
+    final double textHeight = (nameFontSize * 1.25 * nameMaxLines) +
+        textGap +
+        (priceFontSize * 1.25) +
+        textVerticalPadding +
+        safetyBuffer;
+    final double cellHeight = cellWidth + textHeight;
+
+    // Tinggi tab bar kategori — samakan dengan yang dipakai _buildImageGrid.
+    final double tabBarHeight = _isTinyTablet ? 34 : 46;
+
+    return tabBarHeight +
+        (gridPadding * 2) +
+        (cellHeight * visibleRows) +
+        (spacing * (visibleRows - 1));
+  }
+
   /// Grid produk gambar (dipakai oleh _buildImageGrid) — SELALU 4 kolom.
   ///
   /// Gambar dibuat square (1:1) via AspectRatio, dan childAspectRatio

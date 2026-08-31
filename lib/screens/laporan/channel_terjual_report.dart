@@ -14,13 +14,17 @@ const Color _purple = Color(0xFF7C3AED);
 
 /// Report Total Transaksi per Channel (salestipe) — rekap jumlah
 /// transaksi (invoice) & total nominal per channel penjualan untuk
-/// 1 store + rentang tanggal, di-sort dari nominal terbesar lalu
-/// jumlah transaksi terbanyak (urutan sudah dilakukan di backend).
+/// 1 store atau seluruh store yang bisa diakses user + rentang
+/// tanggal, di-sort dari nominal terbesar lalu jumlah transaksi
+/// terbanyak (urutan sudah dilakukan di backend).
 /// - 1 store saja (session): langsung load otomatis (default rentang
 ///   tanggal: bulan berjalan) saat screen dibuka.
-/// - >1 store: begitu user memilih store, data langsung di-load ulang
-///   (tanpa tombol "Proses"), sama seperti pola di OnhandReportScreen
-///   / ItemTerjualReportScreen.
+/// - >1 store: langsung load otomatis dalam mode "Semua Store"
+///   (agregasi) saat screen dibuka — user tidak perlu pilih store
+///   dulu untuk lihat reportnya. Begitu user memilih store tertentu
+///   (atau balik ke "Semua Store") di dropdown, data langsung
+///   di-load ulang (tanpa tombol "Proses"), sama seperti pola di
+///   OnhandReportScreen / ItemTerjualReportScreen.
 class ChannelTerjualReportScreen extends StatefulWidget {
   final List<int> outlets;
 
@@ -66,13 +70,12 @@ class _ChannelTerjualReportScreenState
   }
 
   Future<void> _init() async {
-    if (_singleStore) {
-      _selectedStore = widget.outlets.first;
-    }
+    // Single store: langsung pakai store itu. Multi store: default ke
+    // 0 ("Semua Store") supaya laporan agregat langsung tampil tanpa
+    // user harus pilih store dulu.
+    _selectedStore = _singleStore ? widget.outlets.first : 0;
     await _loadStores();
-    if (_singleStore) {
-      _loadChannelTerjual();
-    }
+    _loadChannelTerjual();
   }
 
   // ============================================================
@@ -163,11 +166,26 @@ class _ChannelTerjualReportScreenState
   }
 
   String _storeName(int id) {
+    if (id == 0) return 'Semua Store';
     final match = _stores.firstWhere(
       (s) => s['id'].toString() == id.toString(),
       orElse: () => {},
     );
     return (match['nama'] as String?) ?? 'Store $id';
+  }
+
+  // Opsi "Semua Store" (id 0) selalu ditaruh paling atas, diikuti
+  // store satu-satu — dipakai di dropdown compact toolbar & portrait
+  // header supaya user multi-outlet bisa balik ke mode agregat kapan
+  // saja tanpa harus keluar dari filter.
+  List<DropdownMenuItem<int>> _storeDropdownItems() {
+    return [
+      const DropdownMenuItem(value: 0, child: Text('Semua Store')),
+      ...widget.outlets.map((id) => DropdownMenuItem(
+            value: id,
+            child: Text(_storeName(id), overflow: TextOverflow.ellipsis),
+          )),
+    ];
   }
 
   String _twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -327,22 +345,14 @@ class _ChannelTerjualReportScreenState
                       isExpanded: true,
                       isDense: true,
                       value: _selectedStore,
-                      hint: const Text('Pilih Store',
-                          style: TextStyle(fontSize: 13)),
                       style: const TextStyle(
                           fontSize: 13,
                           color: Colors.black87,
                           fontWeight: FontWeight.w600),
-                      items: widget.outlets
-                          .map((id) => DropdownMenuItem(
-                                value: id,
-                                child: Text(_storeName(id),
-                                    overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
+                      items: _storeDropdownItems(),
                       onChanged: (val) {
                         setState(() => _selectedStore = val);
-                        if (val != null) _loadChannelTerjual();
+                        _loadChannelTerjual();
                       },
                     ),
                   ),
@@ -508,22 +518,14 @@ class _ChannelTerjualReportScreenState
                       isExpanded: true,
                       isDense: true,
                       value: _selectedStore,
-                      hint: const Text('Pilih Store',
-                          style: TextStyle(fontSize: 14)),
                       style: const TextStyle(
                           fontSize: 14,
                           color: Colors.black87,
                           fontWeight: FontWeight.w600),
-                      items: widget.outlets
-                          .map((id) => DropdownMenuItem(
-                                value: id,
-                                child: Text(_storeName(id),
-                                    overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
+                      items: _storeDropdownItems(),
                       onChanged: (val) {
                         setState(() => _selectedStore = val);
-                        if (val != null) _loadChannelTerjual();
+                        _loadChannelTerjual();
                       },
                     ),
                   ),
@@ -604,13 +606,11 @@ class _ChannelTerjualReportScreenState
       );
     }
     if (!_hasLoadedOnce) {
+      // Baik single maupun multi store sekarang langsung di-load saat
+      // screen dibuka (multi store default ke mode "Semua Store"),
+      // jadi state ini hanya transisi singkat sebelum data pertama masuk.
       return Center(
-        child: Text(
-          widget.outlets.length > 1
-              ? 'Pilih store untuk memuat data channel terjual'
-              : 'Memuat data...',
-          style: TextStyle(color: Colors.grey[500]),
-        ),
+        child: Text('Memuat data...', style: TextStyle(color: Colors.grey[500])),
       );
     }
 

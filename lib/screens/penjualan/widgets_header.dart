@@ -266,6 +266,22 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              // Tambah Item — insert baris baru terpisah, tidak merge
+              // dengan baris produk yang sama (dipakai a.l. untuk item gratis)
+              OutlinedButton.icon(
+                onPressed: _showAddItemSheet,
+                icon: const Icon(Icons.add_circle_outline, size: 16),
+                label: const Text('Tambah'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.green.shade700,
+                  side: BorderSide(color: Colors.green.shade700),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 6),
@@ -549,6 +565,23 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.red,
                   side: const BorderSide(color: Colors.red),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: ultraCompact ? 6 : 8,
+                    vertical: fieldVPad,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              SizedBox(width: ultraCompact ? 4 : 6),
+              // Tambah Item
+              OutlinedButton.icon(
+                onPressed: _showAddItemSheet,
+                icon: Icon(Icons.add_circle_outline, size: iconSize),
+                label: Text('Tambah', style: TextStyle(fontSize: smallFont)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.green.shade700,
+                  side: BorderSide(color: Colors.green.shade700),
                   padding: EdgeInsets.symmetric(
                     horizontal: ultraCompact ? 6 : 8,
                     vertical: fieldVPad,

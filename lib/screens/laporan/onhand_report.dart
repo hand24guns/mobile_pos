@@ -58,10 +58,12 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
     if (_singleStore) {
       _selectedStore = widget.outlets.first;
     }
+    // Multi-store: _selectedStore tetap null -> ditafsirkan backend sebagai
+    // "semua store", jadi onhand total langsung tampil tanpa user harus
+    // pilih store dulu. Kalau nanti user pilih 1 store spesifik di
+    // dropdown, _loadOnhand() dipanggil ulang dengan store itu.
     await _loadStores();
-    if (_singleStore) {
-      _loadOnhand();
-    }
+    _loadOnhand();
   }
 
   // ============================================================
@@ -107,7 +109,10 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
   }
 
   Future<void> _loadOnhand() async {
-    if (_selectedStore == null) return;
+    // _selectedStore == null berarti mode "semua store" (khusus user dengan
+    // akses >1 store) — dikirim sebagai store_id=0, backend yang
+    // menafsirkan itu sebagai agregasi total dari semua store yang bisa
+    // diakses user ini.
     if (!mounted) return;
     setState(() {
       _loadingData = true;
@@ -125,7 +130,7 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
         },
         body: {
           'action': 'getOnhand',
-          'store_id': _selectedStore.toString(),
+          'store_id': (_selectedStore ?? 0).toString(),
         },
       ).timeout(const Duration(seconds: 15));
 
@@ -278,26 +283,29 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
                     overflow: TextOverflow.ellipsis,
                   )
                 : DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
+                    child: DropdownButton<int?>(
                       isExpanded: true,
                       isDense: true,
                       value: _selectedStore,
-                      hint: const Text('Pilih Store',
-                          style: TextStyle(fontSize: 13)),
                       style: const TextStyle(
                           fontSize: 13,
                           color: Colors.black87,
                           fontWeight: FontWeight.w600),
-                      items: widget.outlets
-                          .map((id) => DropdownMenuItem(
-                                value: id,
-                                child: Text(_storeName(id),
-                                    overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Semua Store (Total)',
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        ...widget.outlets.map((id) => DropdownMenuItem<int?>(
+                              value: id,
+                              child: Text(_storeName(id),
+                                  overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
                       onChanged: (val) {
                         setState(() => _selectedStore = val);
-                        if (val != null) _loadOnhand();
+                        _loadOnhand();
                       },
                     ),
                   ),
@@ -427,26 +435,29 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
                     overflow: TextOverflow.ellipsis,
                   )
                 : DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
+                    child: DropdownButton<int?>(
                       isExpanded: true,
                       isDense: true,
                       value: _selectedStore,
-                      hint: const Text('Pilih Store',
-                          style: TextStyle(fontSize: 14)),
                       style: const TextStyle(
                           fontSize: 14,
                           color: Colors.black87,
                           fontWeight: FontWeight.w600),
-                      items: widget.outlets
-                          .map((id) => DropdownMenuItem(
-                                value: id,
-                                child: Text(_storeName(id),
-                                    overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Semua Store (Total)',
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        ...widget.outlets.map((id) => DropdownMenuItem<int?>(
+                              value: id,
+                              child: Text(_storeName(id),
+                                  overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
                       onChanged: (val) {
                         setState(() => _selectedStore = val);
-                        if (val != null) _loadOnhand();
+                        _loadOnhand();
                       },
                     ),
                   ),
@@ -500,9 +511,7 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
     if (!_hasLoadedOnce) {
       return Center(
         child: Text(
-          widget.outlets.length > 1
-              ? 'Pilih store untuk memuat data onhand'
-              : 'Memuat data...',
+          'Memuat data...',
           style: TextStyle(color: Colors.grey[500]),
         ),
       );

@@ -15,43 +15,64 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
           });
         }
 
-        // Panel bawah (cart + summary + tombol) diberi tinggi cukup untuk
-        // menampilkan cart minimal 2 item + summary + tombol, tanpa
-        // "mencuri" terlalu banyak ruang dari grid produk di atas.
+        // ── Image grid dibatasi maksimal 2 baris produk di portrait ──
+        // Dulu grid pakai Expanded penuh, jadi di layar tinggi (tablet
+        // 10"+) grid bisa memanjang sampai 4-5 baris, "mencuri" ruang
+        // dari panel cart di bawahnya (yang akhirnya cuma kebagian
+        // 200-280dp fixed, sering cuma cukup 1 row cart terlihat).
+        // Sekarang tingginya dibatasi lewat ConstrainedBox, sisa ruang
+        // (availableHeight - header - grid - divider) sepenuhnya jadi
+        // milik panel bawah (cart + summary + tombol) lewat Expanded,
+        // jadi cart bisa menampilkan 2 row (atau lebih) juga.
         //
-        // Rumus: gunakan sisa setelah grid diprioritaskan minimal 2 baris.
-        // - 1 baris grid ≈ (lebar panel / 4 kolom) + teks ~45dp
-        //   Pada portrait 7" (~600dp wide setelah right panel): cell ~130dp
-        // - 2 baris grid = ~260dp + tab bar ~40dp + header ~170dp = ~470dp
-        // - Sisa untuk bottom: availableHeight - 470, minimum 220dp
-        //   (cukup untuk 2 item cart + summary ringkas + tombol)
-        //
-        // Alternatif lebih simpel: clamp antara 200–280dp.
-        // 7" portrait body ~600dp → bottom 230dp → grid sisa 370dp → 2 baris
-        // 10" portrait body ~900dp → bottom 280dp → grid sisa 620dp → 4+ baris
-        final bottomPanelHeight = (availableHeight * 0.36).clamp(200.0, 280.0);
+        // Landscape TIDAK terpengaruh — _buildSideBySideLayout tetap
+        // pakai Expanded penuh seperti sebelumnya.
+        final imageGridMaxHeight =
+            _stackedImageGridMaxHeight(constraints.maxWidth);
 
         return Column(
           children: [
             _buildHeader(state),
-            Expanded(child: _buildImageGrid()),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: imageGridMaxHeight),
+              child: _buildImageGrid(),
+            ),
             Container(height: 1, color: Colors.grey.shade300),
-            SizedBox(
-              height: bottomPanelHeight,
-              child: Column(
-                children: [
-                  Expanded(
-                    child: RefreshIndicator(
-                      onRefresh: _checkShiftStillActive,
-                      color: const Color(0xFF1D273B),
-                      child: _buildCart(state),
-                    ),
-                  ),
-                  Container(height: 1, color: Colors.grey.shade300),
-                  _buildSummaryScrollable(state, availableHeight),
-                  Container(height: 1, color: Colors.grey.shade300),
-                  _buildActionButtons(state),
-                ],
+            // Panel bawah (cart + summary + tombol) sekarang Expanded —
+            // otomatis dapat semua sisa tinggi layar setelah header +
+            // grid (yang sudah dibatasi 2 baris di atas), bukan lagi
+            // dibatasi angka fixed 200-280dp.
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, bottomConstraints) {
+                  final bottomPanelHeight = bottomConstraints.maxHeight;
+                  return Column(
+                    children: [
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: _checkShiftStillActive,
+                          color: const Color(0xFF1D273B),
+                          child: _buildCartMobile(state),
+                        ),
+                      ),
+                      Container(height: 1, color: Colors.grey.shade300),
+                      // Budget riil summary = tinggi panel bawah yang
+                      // benar-benar tersedia (bukan fraksi tinggi layar
+                      // penuh) dikurangi perkiraan tinggi tombol aksi,
+                      // supaya summary gak "mikir" dia boleh lebih besar
+                      // dari ruang yang benar-benar tersisa untuk dia + cart.
+                      _buildSummaryScrollable(
+                        state,
+                        availableHeight,
+                        maxHeightOverride:
+                            (bottomPanelHeight - _buttonHeight - 24)
+                                .clamp(80.0, bottomPanelHeight),
+                      ),
+                      Container(height: 1, color: Colors.grey.shade300),
+                      _buildActionButtons(state),
+                    ],
+                  );
+                },
               ),
             ),
           ],
@@ -123,7 +144,17 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
   // Compact mode (landscape kecil): maxHeight diperkecil agar
   // cart masih punya ruang yang cukup di atas summary.
   // ============================================================
-  Widget _buildSummaryScrollable(PenjualanState state, double availableHeight) {
+  // maxHeightOverride: dipakai saat pemanggil sudah tahu budget riil yang
+  // tersisa untuk summary (mis. di portrait, di dalam bottomPanelHeight
+  // yang terbatas) — supaya summary tidak menghitung ulang dari fraksi
+  // tinggi layar PENUH (yang bisa lebih besar dari budget aslinya dan
+  // "mencuri" ruang dari cart). Kalau null, perilaku lama (fraksi dari
+  // availableHeight) tetap dipakai — dipakai di layout landscape.
+  Widget _buildSummaryScrollable(
+    PenjualanState state,
+    double availableHeight, {
+    double? maxHeightOverride,
+  }) {
     final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     // Compact landscape: summary ringkas, beri maks ~50% tinggi
     // Normal landscape : ~60%
@@ -137,8 +168,10 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
       maxFraction = 0.45;
     }
 
+    final maxHeight = maxHeightOverride ?? (availableHeight * maxFraction);
+
     return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: availableHeight * maxFraction),
+      constraints: BoxConstraints(maxHeight: maxHeight),
       child: SingleChildScrollView(
         padding: EdgeInsets.only(bottom: keyboardHeight),
         child: _buildSummary(state),
@@ -152,7 +185,12 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
   // panel summary lebih pendek di layar landscape kecil.
   // ============================================================
   Widget _buildSummary(PenjualanState state) {
-    final compact = _isCompactHeader; // reuse flag
+    // Compact sebelumnya cuma ke-trigger di landscape (_isCompactHeader).
+    // Di portrait sempit (hp, _screenWidth < 600 → _isTinyTablet), summary
+    // tetap nampilin detail Gross/Diskon/DPP/Pajak lengkap + padding besar
+    // — inilah salah satu penyebab cart kepotong habis di hp portrait.
+    // Sekarang portrait sempit ikut dianggap compact juga.
+    final compact = _isCompactHeader || (!_isLandscape && _isTinyTablet);
     final inputDeco = InputDecoration(
       border: const OutlineInputBorder(),
       contentPadding: EdgeInsets.symmetric(

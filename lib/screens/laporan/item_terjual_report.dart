@@ -12,11 +12,14 @@ const Color _green = Color(0xFF16A34A);
 const Color _purple = Color(0xFF7C3AED);
 
 /// Report Item Terjual — rekap qty & netto terjual per produk untuk
-/// 1 store + rentang tanggal, di-sort dari qty terbanyak.
+/// rentang tanggal, di-sort dari qty terbanyak.
 /// - 1 store saja (session): langsung load otomatis (default rentang
 ///   tanggal: bulan berjalan) saat screen dibuka.
-/// - >1 store: begitu user memilih store, data langsung di-load ulang
-///   (tanpa tombol "Proses"), sama seperti pola di OnhandReportScreen.
+/// - >1 store: begitu dibuka langsung load agregat "Semua Outlet"
+///   (store_id 0) tanpa harus pilih dulu. User bisa filter ke 1 store
+///   spesifik lewat dropdown, atau balik lagi ke "Semua Outlet" — sama
+///   seperti pola di OnhandReportScreen. Setiap ganti pilihan data
+///   langsung di-load ulang (tanpa tombol "Proses").
 class ItemTerjualReportScreen extends StatefulWidget {
   final List<int> outlets;
 
@@ -61,13 +64,12 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
   }
 
   Future<void> _init() async {
-    if (_singleStore) {
-      _selectedStore = widget.outlets.first;
-    }
+    // 1 store: langsung pakai store itu. >1 store: default ke "Semua
+    // Outlet" (store_id 0 -> backend agregasikan semua store yang bisa
+    // diakses user), sama seperti pola default di OnhandReportScreen.
+    _selectedStore = _singleStore ? widget.outlets.first : 0;
     await _loadStores();
-    if (_singleStore) {
-      _loadItemTerjual();
-    }
+    _loadItemTerjual();
   }
 
   // ============================================================
@@ -158,6 +160,7 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
   }
 
   String _storeName(int id) {
+    if (id == 0) return 'Semua Outlet';
     final match = _stores.firstWhere(
       (s) => s['id'].toString() == id.toString(),
       orElse: () => {},
@@ -326,13 +329,18 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
                           fontSize: 13,
                           color: Colors.black87,
                           fontWeight: FontWeight.w600),
-                      items: widget.outlets
-                          .map((id) => DropdownMenuItem(
-                                value: id,
-                                child: Text(_storeName(id),
-                                    overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
+                      items: [
+                        const DropdownMenuItem(
+                          value: 0,
+                          child: Text('Semua Outlet',
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        ...widget.outlets.map((id) => DropdownMenuItem(
+                              value: id,
+                              child: Text(_storeName(id),
+                                  overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
                       onChanged: (val) {
                         setState(() => _selectedStore = val);
                         if (val != null) _loadItemTerjual();
@@ -506,13 +514,18 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
                           fontSize: 14,
                           color: Colors.black87,
                           fontWeight: FontWeight.w600),
-                      items: widget.outlets
-                          .map((id) => DropdownMenuItem(
-                                value: id,
-                                child: Text(_storeName(id),
-                                    overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
+                      items: [
+                        const DropdownMenuItem(
+                          value: 0,
+                          child: Text('Semua Outlet',
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        ...widget.outlets.map((id) => DropdownMenuItem(
+                              value: id,
+                              child: Text(_storeName(id),
+                                  overflow: TextOverflow.ellipsis),
+                            )),
+                      ],
                       onChanged: (val) {
                         setState(() => _selectedStore = val);
                         if (val != null) _loadItemTerjual();
@@ -598,9 +611,7 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
     if (!_hasLoadedOnce) {
       return Center(
         child: Text(
-          widget.outlets.length > 1
-              ? 'Pilih store untuk memuat data item terjual'
-              : 'Memuat data...',
+          'Memuat data...',
           style: TextStyle(color: Colors.grey[500]),
         ),
       );

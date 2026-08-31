@@ -64,6 +64,9 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   final Map<int, TextEditingController> _itemNotesControllers = {};
   // Set of item indices yang sedang expanded (menampilkan input notes)
   final Set<int> _expandedNotes = {};
+  // Set of item indices yang nama produknya sedang expanded (tap-to-expand
+  // untuk baca nama panjang dengan banyak addon secara penuh)
+  final Set<int> _expandedNames = {};
 
   String _token = '';
   int _userID = 0;

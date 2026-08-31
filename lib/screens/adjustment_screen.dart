@@ -552,32 +552,39 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     );
   }
 
-  // ── Portrait: tab switch antara grid gambar & list item ──
+  // ── Portrait: stacked, sama seperti _buildStackedLayout di
+  // penjualan_screen.dart — grid gambar & list ditampilkan bersamaan
+  // (bukan tab), grid dibatasi maksimal 2 row supaya list adjustment
+  // tetap kebagian ruang (minimal 2 row) alih-alih ke-squeeze ke 0/1 row.
   Widget _buildStacked() {
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        children: [
-          Container(
-            color: Colors.white,
-            child: const TabBar(
-              labelColor: _navy,
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: _navy,
-              tabs: [
-                Tab(text: 'Produk'),
-                Tab(text: 'List Adjustment'),
-              ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final gridMaxHeight = _stackedImageGridMaxHeight(constraints.maxWidth);
+        return Column(
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: gridMaxHeight),
+              child: _buildImageGrid(),
             ),
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [_buildImageGrid(), _buildItemList()],
-            ),
-          ),
-        ],
-      ),
+            Container(height: 1, color: Colors.grey.shade300),
+            Expanded(child: _buildItemList()),
+          ],
+        );
+      },
     );
+  }
+
+  // ── Hitung tinggi maksimal grid gambar untuk persis 2 row, mirror
+  // formula cell-size di _buildProductGrid (4 kolom, cell square + 1
+  // baris nama) ditambah tinggi TabBar kategori di atasnya.
+  double _stackedImageGridMaxHeight(double maxWidth) {
+    const columns = 4;
+    const spacing = 8.0;
+    const categoryTabBarHeight = 48.0;
+    final cellWidth = (maxWidth - spacing * (columns + 1)) / columns;
+    final cellHeight = cellWidth + 32; // gambar square + 1 baris nama
+    final twoRowsHeight = cellHeight * 2 + spacing * 3; // top+mid+bottom gap
+    return categoryTabBarHeight + twoRowsHeight;
   }
 
   // ── Header: outlet, tanggal, no. dokumen, tipe, SKU search ──
