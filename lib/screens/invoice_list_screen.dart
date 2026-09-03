@@ -312,6 +312,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           'action': 'getInvoiceDetail',
           'invoice_id': invoiceId,
         }));
+    if (res.data['success'] != true) {
+      throw Exception(res.data['message'] ?? 'Invoice tidak bisa dicetak');
+    }
     return {
       'items': List<Map<String, dynamic>>.from(res.data['data']),
       'keterangan': res.data['keterangan'] ?? '',
@@ -636,7 +639,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
             backgroundColor: Colors.red,
           ),
         );
-        await _loadInvoices(); // refresh list — invoice REQ VO tidak muncul lagi
+        await _loadInvoices(); // refresh list — invoice tetap muncul dgn badge "Request Void"
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1371,13 +1374,19 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       if (parts.length == 3) tanggalLabel = '${parts[2]}/${parts[1]}/${parts[0]}';
     }
 
+    // Invoice yang sedang menunggu approval void — tetap dihitung sebagai
+    // transaksi valid, hanya tombol void diganti badge keterangan.
+    final isPendingVoid = (inv['status'] ?? '').toString() == 'REQ VO';
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isPendingVoid ? Colors.orange.withValues(alpha: 0.04) : Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+          color: isPendingVoid ? Colors.orange.shade200 : Colors.grey.shade200,
+        ),
       ),
       child: Row(
         children: [
@@ -1473,20 +1482,48 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          // Print button
+          // Print button — dimatikan kalau invoice sedang REQ VO
           _squareIconButton(
             icon: Icons.print_outlined,
-            tooltip: _isFnB ? 'Print Ulang' : 'Print',
+            tooltip: isPendingVoid
+                ? 'Tidak bisa print — menunggu approval void'
+                : (_isFnB ? 'Print Ulang' : 'Print'),
+            enabled: !isPendingVoid,
             onPressed: () => _handlePrint(inv),
           ),
           const SizedBox(width: 8),
-          // Request Void
-          _squareIconButton(
-            icon: Icons.cancel_outlined,
-            tooltip: 'Request Void',
-            iconColor: Colors.red,
-            onPressed: () => _requestVoid(inv),
-          ),
+          // Request Void — disembunyikan & diganti badge kalau sudah REQ VO
+          if (isPendingVoid)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.hourglass_top_rounded,
+                      size: 14, color: Colors.orange.shade800),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Request Void',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange.shade800),
+                  ),
+                ],
+              ),
+            )
+          else
+            _squareIconButton(
+              icon: Icons.cancel_outlined,
+              tooltip: 'Request Void',
+              iconColor: Colors.red,
+              onPressed: () => _requestVoid(inv),
+            ),
         ],
       ),
     );
@@ -1497,21 +1534,24 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     required String tooltip,
     required VoidCallback onPressed,
     Color iconColor = const Color(0xFF1D273B),
+    bool enabled = true,
   }) {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        onTap: onPressed,
+        onTap: enabled ? onPressed : null,
         borderRadius: BorderRadius.circular(8),
         child: Container(
           width: 36,
           height: 36,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade300),
+            border: Border.all(
+                color: enabled ? Colors.grey.shade300 : Colors.grey.shade200),
             borderRadius: BorderRadius.circular(8),
+            color: enabled ? null : Colors.grey.shade50,
           ),
-          child: Icon(icon, size: 18, color: iconColor),
+          child: Icon(icon, size: 18, color: enabled ? iconColor : Colors.grey.shade400),
         ),
       ),
     );
