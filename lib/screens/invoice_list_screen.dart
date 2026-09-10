@@ -53,6 +53,11 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   String? _selectedChannelName;
   List<Map<String, dynamic>> _channelOptions = []; // [{id, nama}]
 
+  // ── Filter outlet/store ─────────────────────────────────────────
+  int? _selectedStoreId; // null = semua outlet
+  String? _selectedStoreName;
+  List<Map<String, dynamic>> _storeOptions = []; // [{id, nama}] — diambil dari getStores
+
   // ── Filter search (baru) — cari no invoice / customer / kasir ──
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
@@ -69,7 +74,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           inv['cara_bayar'] == _selectedCaraBayar;
       final matchChannel = _selectedChannelId == null ||
           inv['channel_id'] == _selectedChannelId;
-      if (!matchCaraBayar || !matchChannel) return false;
+      final matchStore = _selectedStoreId == null ||
+          inv['store_id'] == _selectedStoreId;
+      if (!matchCaraBayar || !matchChannel || !matchStore) return false;
       if (query.isEmpty) return true;
       final kode = (inv['kode'] ?? '').toString().toLowerCase();
       final member = (inv['member'] ?? '').toString().toLowerCase();
@@ -102,6 +109,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     return !isDefaultDate ||
         _selectedCaraBayar != null ||
         _selectedChannelId != null ||
+        _selectedStoreId != null ||
         _searchQuery.trim().isNotEmpty;
   }
 
@@ -149,6 +157,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
           }));
       final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
       _isMultiStore = stores.length > 1;
+      _storeOptions = stores;
 
       // Default ke store pertama
       _activeStoreID = int.parse(stores.first['id'].toString());
@@ -794,6 +803,84 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     });
   }
 
+  // ── Popup pilih outlet/store ──────────────────────────────────
+  Future<void> _pickStore() async {
+    final picked = await showDialog<int?>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Filter Outlet',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, -1), // -1 = "Semua"
+            child: Row(
+              children: [
+                Icon(Icons.all_inclusive,
+                    size: 18,
+                    color: _selectedStoreId == null
+                        ? const Color(0xFF1D273B)
+                        : Colors.grey),
+                const SizedBox(width: 10),
+                Text('Semua Outlet',
+                    style: TextStyle(
+                        fontWeight: _selectedStoreId == null
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: _selectedStoreId == null
+                            ? const Color(0xFF1D273B)
+                            : null)),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ..._storeOptions.map((s) {
+            final id = int.parse(s['id'].toString());
+            final nama = (s['nama'] ?? s['name'] ?? '').toString();
+            final selected = _selectedStoreId == id;
+            return SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, id),
+              child: Row(
+                children: [
+                  Icon(Icons.storefront,
+                      size: 18,
+                      color: selected ? const Color(0xFF1D273B) : Colors.grey),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(nama,
+                        style: TextStyle(
+                            fontWeight:
+                                selected ? FontWeight.bold : FontWeight.normal,
+                            color: selected ? const Color(0xFF1D273B) : null)),
+                  ),
+                  if (selected) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.check, size: 16, color: Color(0xFF1D273B)),
+                  ],
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+
+    if (picked == null) return;
+    setState(() {
+      if (picked == -1) {
+        _selectedStoreId = null;
+        _selectedStoreName = null;
+      } else {
+        _selectedStoreId = picked;
+        final match = _storeOptions.firstWhere(
+          (s) => int.parse(s['id'].toString()) == picked,
+          orElse: () => {},
+        );
+        _selectedStoreName = (match['nama'] ?? match['name'] ?? '').toString();
+      }
+      _currentPage = 0;
+    });
+  }
+
   // ── Label gabungan "Channel - Cara Bayar" (mis. "TAKEAWAY - EDC") ─
   String _channelCaraBayarLabel(Map<String, dynamic> inv) {
     final channel = (inv['sales_tipe'] ?? '').toString().trim();
@@ -816,6 +903,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       _selectedCaraBayar = null;
       _selectedChannelId = null;
       _selectedChannelName = null;
+      _selectedStoreId = null;
+      _selectedStoreName = null;
       _searchCtrl.clear();
       _searchQuery = '';
       _currentPage = 0;
@@ -971,6 +1060,13 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                   onTap:
                                       _channelOptions.isEmpty ? null : _pickChannel,
                                 );
+                                final storeBtn = _dropdownLikeButton(
+                                  icon: Icons.store_outlined,
+                                  label: _selectedStoreName ?? 'Semua Outlet',
+                                  onTap: _storeOptions.length <= 1
+                                      ? null
+                                      : _pickStore,
+                                );
                                 final filterBtn = ElevatedButton.icon(
                                   onPressed: _loadInvoices,
                                   style: ElevatedButton.styleFrom(
@@ -1012,6 +1108,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                       const SizedBox(height: 8),
                                       channelBtn,
                                       const SizedBox(height: 8),
+                                      storeBtn,
+                                      const SizedBox(height: 8),
                                       Row(
                                         children: [
                                           Expanded(child: filterBtn),
@@ -1033,6 +1131,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                     Expanded(flex: 2, child: caraBayarBtn),
                                     const SizedBox(width: 10),
                                     Expanded(flex: 2, child: channelBtn),
+                                    const SizedBox(width: 10),
+                                    Expanded(flex: 2, child: storeBtn),
                                     const SizedBox(width: 10),
                                     filterBtn,
                                     const SizedBox(width: 8),
@@ -1080,6 +1180,16 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                           : () => setState(() {
                                                 _selectedChannelId = null;
                                                 _selectedChannelName = null;
+                                                _currentPage = 0;
+                                              }),
+                                    ),
+                                    _filterChip(
+                                      'Outlet: ${_selectedStoreName ?? 'Semua'}',
+                                      onRemove: _selectedStoreId == null
+                                          ? null
+                                          : () => setState(() {
+                                                _selectedStoreId = null;
+                                                _selectedStoreName = null;
                                                 _currentPage = 0;
                                               }),
                                     ),
