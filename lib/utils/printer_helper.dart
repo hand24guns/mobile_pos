@@ -150,6 +150,18 @@ class PrinterHelper {
     final generator = Generator(PaperSize.mm58, profile);
     List<int> bytes = [];
 
+    // ── Sanitasi semua teks bebas sebelum diproses ke printer ───
+    // Mencegah "Contains invalid characters" akibat smart-quote,
+    // emoji, atau karakter non-ASCII lain dari input manual kasir.
+    storeName = _sanitizeForPrint(storeName);
+    storeAddress = _sanitizeForPrint(storeAddress);
+    memberNama = _sanitizeForPrint(memberNama);
+    if (npwp != null) npwp = _sanitizeForPrint(npwp);
+    if (keterangan != null) keterangan = _sanitizeForPrint(keterangan);
+    if (salesTipe != null) salesTipe = _sanitizeForPrint(salesTipe);
+    if (voucherKode != null) voucherKode = _sanitizeForPrint(voucherKode);
+    if (invoiceNote != null) invoiceNote = _sanitizeForPrint(invoiceNote);
+
     // ── RESET printer — pastikan mulai dari state bersih ────────
     bytes += generator.reset();
 
@@ -250,8 +262,9 @@ class PrinterHelper {
     // ── FIX #2: ITEM LIST dengan isian & addon ───────────────────
     for (var item in items) {
       // Nama produk
+      final namaProduk = _sanitizeForPrint(item['nama'] as String);
       bytes += generator.text(
-        item['nama'] as String,
+        namaProduk,
         styles: const PosStyles(bold: true),
       );
 
@@ -287,7 +300,7 @@ class PrinterHelper {
       }
 
       // Keterangan per item (jika ada)
-      final itemKet = item['keterangan'] as String? ?? '';
+      final itemKet = _sanitizeForPrint(item['keterangan'] as String? ?? '');
       if (itemKet.isNotEmpty) {
         bytes += generator.text('  >> Note : $itemKet');
       }
@@ -409,7 +422,8 @@ class PrinterHelper {
 
     // ── FOOTER — dari dim_divisi.invoice_note ────────────────────
     final noteText = (invoiceNote != null && invoiceNote.isNotEmpty)
-        ? invoiceNote.replaceAll(RegExp(r'<[^>]*>'), '').trim()
+        ? _sanitizeForPrint(
+            invoiceNote.replaceAll(RegExp(r'<[^>]*>'), '').trim())
         : 'Terima kasih atas kunjungan Anda';
     bytes += generator.text(
       noteText,
@@ -450,6 +464,14 @@ class PrinterHelper {
     final profile = await CapabilityProfile.load();
     final generator = Generator(PaperSize.mm58, profile);
     List<int> bytes = [];
+
+    // ── Sanitasi semua teks bebas sebelum diproses ke printer ───
+    storeName = _sanitizeForPrint(storeName);
+    memberNama = _sanitizeForPrint(memberNama);
+    if (tableInfo != null) tableInfo = _sanitizeForPrint(tableInfo);
+    if (salesTipe != null) salesTipe = _sanitizeForPrint(salesTipe);
+    if (orderNote != null) orderNote = _sanitizeForPrint(orderNote);
+    if (keterangan != null) keterangan = _sanitizeForPrint(keterangan);
 
     // ── RESET printer — pastikan mulai dari state bersih ────────
     bytes += generator.reset();
@@ -534,7 +556,7 @@ class PrinterHelper {
     const int kitchenLineWidth = 32; // char per baris untuk normal size
     for (var item in items) {
       final qty = item['qty'];
-      final nama = item['nama'] as String;
+      final nama = _sanitizeForPrint(item['nama'] as String);
 
       // Prefix baris pertama: "1 x " — lanjutan: spasi sejumlah prefix
       final prefix = '$qty x ';
@@ -566,13 +588,13 @@ class PrinterHelper {
       }
 
       // Catatan item (jika ada kolom 'note' per item)
-      final itemNote = item['note'] as String? ?? '';
+      final itemNote = _sanitizeForPrint(item['note'] as String? ?? '');
       if (itemNote.isNotEmpty) {
         bytes += generator.text('  >> Note: $itemNote');
       }
 
       // Keterangan per item (dari kolom keterangan temp_invoice / tr_invoicedetil)
-      final itemKet = item['keterangan'] as String? ?? '';
+      final itemKet = _sanitizeForPrint(item['keterangan'] as String? ?? '');
       if (itemKet.isNotEmpty) {
         bytes += generator.text('  >> Note: $itemKet');
       }
@@ -724,6 +746,15 @@ class PrinterHelper {
     final generator = Generator(PaperSize.mm58, profile);
     List<int> bytes = [];
 
+    // ── Sanitasi semua teks bebas sebelum diproses ke printer ───
+    storeName = _sanitizeForPrint(storeName);
+    storeAddress = _sanitizeForPrint(storeAddress);
+    memberNama = _sanitizeForPrint(memberNama);
+    if (npwp != null) npwp = _sanitizeForPrint(npwp);
+    if (keterangan != null) keterangan = _sanitizeForPrint(keterangan);
+    if (salesTipe != null) salesTipe = _sanitizeForPrint(salesTipe);
+    if (voucherKode != null) voucherKode = _sanitizeForPrint(voucherKode);
+
     // ── RESET printer — pastikan mulai dari state bersih ────────
     bytes += generator.reset();
 
@@ -814,8 +845,9 @@ class PrinterHelper {
     // (identik dengan printInvoice)
     for (var item in items) {
       // Nama produk
+      final namaProduk = _sanitizeForPrint(item['nama'] as String);
       bytes += generator.text(
-        item['nama'] as String,
+        namaProduk,
         styles: const PosStyles(bold: true),
       );
 
@@ -850,7 +882,7 @@ class PrinterHelper {
       }
 
       // Keterangan per item (jika ada)
-      final itemKet = item['keterangan'] as String? ?? '';
+      final itemKet = _sanitizeForPrint(item['keterangan'] as String? ?? '');
       if (itemKet.isNotEmpty) {
         bytes += generator.text('  >> Note : $itemKet');
       }
@@ -930,7 +962,8 @@ class PrinterHelper {
 
     // ── FOOTER — dari dim_divisi.invoice_note ────────────────────
     final noteText = (invoiceNote != null && invoiceNote.isNotEmpty)
-        ? invoiceNote.replaceAll(RegExp(r'<[^>]*>'), '').trim()
+        ? _sanitizeForPrint(
+            invoiceNote.replaceAll(RegExp(r'<[^>]*>'), '').trim())
         : 'Terima kasih atas kunjungan Anda';
     bytes += generator.text(
       noteText,
@@ -1024,14 +1057,15 @@ class PrinterHelper {
       for (final item in isianRaw) {
         if (item is Map) {
           // Format baru: {"id": 4, "nama": "Keju"} → tampilkan nama saja
-          final nama = item['nama']?.toString() ?? '';
+          final nama = _sanitizeForPrint(item['nama']?.toString() ?? '');
           if (nama.isNotEmpty) {
             lines.add('    * $nama');
           }
         } else {
           // Format lama: string biasa
-          if (item.toString().isNotEmpty) {
-            lines.add('    * ${item.toString()}');
+          final nama = _sanitizeForPrint(item.toString());
+          if (nama.isNotEmpty) {
+            lines.add('    * $nama');
           }
         }
       }
@@ -1043,7 +1077,7 @@ class PrinterHelper {
       for (final addon in addonRaw) {
         if (addon is Map) {
           // Format baru: {"nama": "Bon Cabe", "harga": 1000}
-          final nama = addon['nama']?.toString() ?? '';
+          final nama = _sanitizeForPrint(addon['nama']?.toString() ?? '');
           final harga = double.tryParse(addon['harga'].toString()) ?? 0;
           if (nama.isNotEmpty) {
             final hargaStr = (showAddonPrice && harga > 0)
@@ -1053,14 +1087,40 @@ class PrinterHelper {
           }
         } else {
           // Format lama: string biasa tanpa harga
-          if (addon.toString().isNotEmpty) {
-            lines.add('    * ${addon.toString()}');
+          final nama = _sanitizeForPrint(addon.toString());
+          if (nama.isNotEmpty) {
+            lines.add('    * $nama');
           }
         }
       }
     }
 
     return lines;
+  }
+
+  // ── Sanitasi teks bebas sebelum dikirim ke printer ───────────
+  //
+  // Thermal printer (via esc_pos_utils_plus) encode teks pakai
+  // code page terbatas (mis. CP437/CP1252). Karakter "smart"
+  // typographic (smart quote, en/em dash, ellipsis) atau emoji
+  // dari autocorrect keyboard TIDAK ada di code page itu, dan
+  // generator.text() akan throw:
+  //   "Invalid argument (string): Contains invalid characters."
+  //
+  // Fungsi ini:
+  //   1. Ganti karakter smart/typographic umum ke padanan ASCII-nya
+  //   2. Buang sisa karakter apa pun di luar printable ASCII (0x20-0x7E)
+  //      supaya print tidak pernah gagal karena karakter aneh.
+  static String _sanitizeForPrint(String text) {
+    if (text.isEmpty) return text;
+    var t = text
+        .replaceAll(RegExp(r'[\u2018\u2019\u201A\u201B]'), "'") // ‘ ’ ‚ ‛
+        .replaceAll(RegExp(r'[\u201C\u201D\u201E\u201F]'), '"') // “ ” „ ‟
+        .replaceAll(RegExp(r'[\u2013\u2014]'), '-') // – —
+        .replaceAll('\u2026', '...'); // …
+    // Buang semua karakter di luar printable ASCII (termasuk emoji, dsb)
+    t = t.replaceAll(RegExp(r'[^\x20-\x7E]'), '');
+    return t;
   }
 
   // ── Format angka dengan titik ribuan ────────────────────────
