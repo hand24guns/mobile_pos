@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../services/session_service.dart';
 import '../services/api_service.dart';
-import '../utils/printer_helper.dart'; // TODO: sesuaikan path ini dengan lokasi printer_helper.dart di project-mu
+import '../utils/printer_helper.dart';
 import 'penjualan/penjualan_screen.dart';
 import 'invoice_list_screen.dart';
 import 'laporan_pembayaran_screen.dart';
@@ -13,6 +13,7 @@ import 'printer_screen.dart';
 import 'adjustment_screen.dart';
 import 'laporan_screen.dart';
 import 'pengaturan_screen.dart';
+import 'petikes/petikes_screen.dart';
 
 // ─── Palette ────────────────────────────────────────────────
 const Color _navy = Color(0xFF0D1B3E);
@@ -345,6 +346,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       case 1:
         return LaporanScreen(outlets: _outlets);
       case 2:
+        return KasKecilScreen(outlets: _outlets);
+      case 3:
         return PengaturanScreen(outlets: _outlets);
       default:
         return _buildHomeContent();
@@ -785,10 +788,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               onTap: () => setState(() => _navIndex = 1),
             ),
             _BottomNavItem(
-              icon: Icons.settings_rounded,
-              label: 'Pengaturan',
+              icon: Icons.wallet_outlined,
+              label: 'Kas Kecil',
               selected: _navIndex == 2,
               onTap: () => setState(() => _navIndex = 2),
+            ),
+            _BottomNavItem(
+              icon: Icons.settings_rounded,
+              label: 'Pengaturan',
+              selected: _navIndex == 3,
+              onTap: () => setState(() => _navIndex = 3),
             ),
           ],
         ),
