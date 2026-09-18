@@ -50,6 +50,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // dengan path yang dipakai sidebar.php versi web).
   static const String _menuPathAdjustment = 'penyesuaian/Adjustment';
 
+  // Path menu di m_menu_pos yang mewakili fitur Kas Kecil, sama pola
+  // dengan _menuPathAdjustment di atas. NOTE: sesuaikan string ini
+  // dengan path asli menu "Kas Kecil" di sidebar.php / m_menu_pos —
+  // nilai di bawah ini masih tebakan mengikuti pola 'folder/Nama'.
+  static const String _menuPathKasKecil = 'petikes/Kas';
+
   // ── Tooltip "Ubah Password" di header ─────────────────────
   // LayerLink menghubungkan posisi tooltip (OverlayEntry) dengan
   // posisi baris username di header, supaya tooltip muncul persis
@@ -224,6 +230,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       !_sessionLoaded ||
       (_outlets.isNotEmpty && _menus.contains(_menuPathAdjustment));
 
+  // Kas Kecil butuh syarat yang sama seperti Penyesuaian: akses store
+  // DAN akses menu grup dari m_user_grup -> m_grup_menu -> m_menu_pos.
+  bool get _hasKasKecilAccess =>
+      !_sessionLoaded ||
+      (_outlets.isNotEmpty && _menus.contains(_menuPathKasKecil));
+
   void _showNoStoreAccessWarning() {
     showDialog(
       context: context,
@@ -249,6 +261,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final reason = _outlets.isEmpty
         ? 'Akun kamu belum memiliki akses ke store manapun.'
         : 'Akun kamu tidak memiliki izin akses menu Penyesuaian.';
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: const Icon(Icons.lock_outline_rounded, color: _navy, size: 32),
+        title: const Text('Tidak Ada Akses'),
+        content: Text('$reason Silakan hubungi admin untuk mendapatkan akses.'),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(backgroundColor: _navy),
+            child: const Text('OK', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showNoKasKecilAccessWarning() {
+    final reason = _outlets.isEmpty
+        ? 'Akun kamu belum memiliki akses ke store manapun.'
+        : 'Akun kamu tidak memiliki izin akses menu Kas Kecil.';
 
     showDialog(
       context: context,
@@ -346,7 +381,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       case 1:
         return LaporanScreen(outlets: _outlets);
       case 2:
-        return KasKecilScreen(outlets: _outlets);
+        // Jaga-jaga: seharusnya tidak tercapai karena tile bottom nav
+        // sudah di-disable saat tidak ada akses, tapi tetap dijaga di
+        // sini kalau-kalau _navIndex sempat ke-set 2 sebelumnya.
+        return _hasKasKecilAccess
+            ? KasKecilScreen(outlets: _outlets)
+            : _buildHomeContent();
       case 3:
         return PengaturanScreen(outlets: _outlets);
       default:
@@ -790,8 +830,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             _BottomNavItem(
               icon: Icons.wallet_outlined,
               label: 'Kas Kecil',
-              selected: _navIndex == 2,
-              onTap: () => setState(() => _navIndex = 2),
+              selected: _hasKasKecilAccess && _navIndex == 2,
+              enabled: _hasKasKecilAccess,
+              onTap: _hasKasKecilAccess
+                  ? () => setState(() => _navIndex = 2)
+                  : _showNoKasKecilAccessWarning,
             ),
             _BottomNavItem(
               icon: Icons.settings_rounded,
@@ -1125,16 +1168,53 @@ class _BottomNavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool enabled;
 
   const _BottomNavItem({
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.enabled = true,
   });
+
+  // Icon default tab ini memang sudah abu-abu saat tidak terpilih,
+  // jadi "abu-abu biasa" tidak cukup untuk menandakan disabled. Saat
+  // enabled == false, icon digambar lebih pudar DAN dicoret diagonal
+  // (mirip tanda "no entry" tapi versi garis saja) supaya beda kentara
+  // dari state "sekedar belum dipilih".
+  Widget _buildIcon() {
+    if (!enabled) {
+      return SizedBox(
+        width: 24,
+        height: 24,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(icon, color: Colors.grey.shade300, size: 24),
+            Transform.rotate(
+              angle: -0.7854, // -45 derajat
+              child: Container(
+                width: 26,
+                height: 2,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade500,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Icon(icon, color: selected ? _blue : Colors.grey[400], size: 24);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final labelColor =
+        !enabled ? Colors.grey.shade300 : (selected ? _blue : Colors.grey[400]);
+
     return Expanded(
       child: InkWell(
         onTap: onTap,
@@ -1143,12 +1223,12 @@ class _BottomNavItem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: selected ? _blue : Colors.grey[400], size: 24),
+              _buildIcon(),
               const SizedBox(height: 4),
               Text(
                 label,
                 style: TextStyle(
-                  color: selected ? _blue : Colors.grey[400],
+                  color: labelColor,
                   fontSize: 11,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                 ),
