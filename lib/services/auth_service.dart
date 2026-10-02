@@ -26,7 +26,6 @@ class AuthService {
       String username, String password) async {
     try {
       final dio = ApiService.getDio();
-
       Response response;
       try {
         // Panggilan RESTful API standar: POST /v1/auth/login dengan body JSON
@@ -132,10 +131,24 @@ class AuthService {
           menus: menus,
         );
       }
+          outlets: outlets,
+          menus: menus,
+        );
+      }
 
       return responseData;
     } on DioException catch (e) {
+      // Menangkap pesan eror yang dikirim oleh backend PHP (seperti status 401/400)
+      if (e.response != null && e.response?.data is Map<String, dynamic>) {
+        return e.response!.data as Map<String, dynamic>;
+      }
       return _handleDioError(e);
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Gagal terhubung ke server. Periksa koneksi internet Anda.',
+      };
+    }
     } catch (e) {
       return {
         'success': false,

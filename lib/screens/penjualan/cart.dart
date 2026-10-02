@@ -45,6 +45,10 @@ extension PenjualanCartX on _PenjualanScreenState {
         salesTipeId: state.salesTipeID,
       );
 
+final Map<String, dynamic> resMap = (res.data is Map)
+          ? Map<String, dynamic>.from(res.data)
+          : jsonDecode(
+              res.data.toString().substring(res.data.toString().indexOf('{')));
       if (resMap['success'] != true) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -507,13 +511,17 @@ extension PenjualanCartX on _PenjualanScreenState {
         isFree: isFree,
       );
 
+final Map<String, dynamic> resMap = (res.data is Map)
+          ? Map<String, dynamic>.from(res.data)
+          : jsonDecode(
+              res.data.toString().substring(res.data.toString().indexOf('{')));
       if (resMap['success'] == true) {
         await _refreshFromApi();
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content:
-                Text(resMap['message']?.toString() ?? 'Gagal mengubah status gratis'),
+Text(resMap['message']?.toString() ?? 'Gagal mengubah status gratis'),
             backgroundColor: Colors.red,
           ),
         );
