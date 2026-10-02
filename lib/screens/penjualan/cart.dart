@@ -58,11 +58,17 @@ extension PenjualanCartX on _PenjualanScreenState {
         }),
       );
 
-      if (res.data['success'] != true) {
+      final Map<String, dynamic> resMap = (res.data is Map)
+          ? Map<String, dynamic>.from(res.data)
+          : jsonDecode(
+              res.data.toString().substring(res.data.toString().indexOf('{')));
+
+      if (resMap['success'] != true) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(res.data['message'] ?? 'Gagal mengubah qty'),
+              content:
+                  Text(resMap['message']?.toString() ?? 'Gagal mengubah qty'),
               backgroundColor: Colors.red,
             ),
           );
@@ -525,7 +531,8 @@ extension PenjualanCartX on _PenjualanScreenState {
                             reason: selectedReason!,
                           );
                         },
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  style:
+                      ElevatedButton.styleFrom(backgroundColor: Colors.green),
                   child: const Text(
                     'Jadikan Gratis',
                     style: TextStyle(color: Colors.white),
@@ -561,12 +568,18 @@ extension PenjualanCartX on _PenjualanScreenState {
         }),
       );
 
-      if (res.data['success'] == true) {
+      final Map<String, dynamic> resMap = (res.data is Map)
+          ? Map<String, dynamic>.from(res.data)
+          : jsonDecode(
+              res.data.toString().substring(res.data.toString().indexOf('{')));
+
+      if (resMap['success'] == true) {
         await _refreshFromApi();
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(res.data['message'] ?? 'Gagal mengubah status gratis'),
+            content:
+                Text(res.data['message'] ?? 'Gagal mengubah status gratis'),
             backgroundColor: Colors.red,
           ),
         );
@@ -654,8 +667,7 @@ extension PenjualanCartX on _PenjualanScreenState {
                   selectedKode = p['kode']?.toString();
                   selectedNama = p['nama']?.toString();
                   selectedIsGiftEligible = isGiftEligible;
-                  searchController.text =
-                      '${p['nama']} (${p['kode']})';
+                  searchController.text = '${p['nama']} (${p['kode']})';
                   searchResults = [];
                   isSearching = false;
                   // Reset pilihan gift kalau produk yang baru terpilih
@@ -857,8 +869,7 @@ extension PenjualanCartX on _PenjualanScreenState {
                       title: Text(r),
                       value: r,
                       groupValue: giftReason,
-                      onChanged: (val) =>
-                          setSheetState(() => giftReason = val),
+                      onChanged: (val) => setSheetState(() => giftReason = val),
                     ),
                   ),
                 ],
@@ -943,5 +954,4 @@ extension PenjualanCartX on _PenjualanScreenState {
   // ============================================================
   // PROSES BAYAR
   // ============================================================
-
 }

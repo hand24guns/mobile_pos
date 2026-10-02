@@ -331,19 +331,22 @@ extension PenjualanProductsX on _PenjualanScreenState {
     Set<int> selectedIsianIds = {};
     Set<int> selectedAddonIds = {};
     final prevKeterangan = item.keterangan ?? '';
-    try {
-      final oldNotes =
-          jsonDecode(item.packagesNotes!) as Map<String, dynamic>;
-      selectedIsianIds = ((oldNotes['isian'] as List?) ?? [])
-          .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
-          .where((id) => id != 0)
-          .toSet();
-      selectedAddonIds = ((oldNotes['addon'] as List?) ?? [])
-          .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
-          .where((id) => id != 0)
-          .toSet();
-    } catch (e) {
-      debugPrint('[_editPackageItem] gagal parse packages_notes lama: $e');
+    if (item.packagesNotes != null && item.packagesNotes!.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(item.packagesNotes!);
+        if (decoded is Map<String, dynamic>) {
+          selectedIsianIds = ((decoded['isian'] as List?) ?? [])
+              .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
+              .where((id) => id != 0)
+              .toSet();
+          selectedAddonIds = ((decoded['addon'] as List?) ?? [])
+              .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
+              .where((id) => id != 0)
+              .toSet();
+        }
+      } catch (e) {
+        debugPrint('[_editPackageItem] gagal parse packages_notes: $e');
+      }
     }
 
     if (!mounted) return;
@@ -656,5 +659,4 @@ extension PenjualanProductsX on _PenjualanScreenState {
   // ============================================================
   // REMOVE & UPDATE QTY
   // ============================================================
-
 }

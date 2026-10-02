@@ -75,12 +75,29 @@ extension PenjualanPaymentX on _PenjualanScreenState {
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Batal'),
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1D273B),
-            ),
-            child: const Text('Proses', style: TextStyle(color: Colors.white)),
+          StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              bool isSubmitting = false;
+              return ElevatedButton(
+                onPressed: isSubmitting
+                    ? null
+                    : () {
+                        setDialogState(() => isSubmitting = true);
+                        Navigator.pop(context, true);
+                      },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1D273B)),
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Proses',
+                        style: TextStyle(color: Colors.white)),
+              );
+            },
           ),
         ],
       ),
@@ -309,14 +326,21 @@ extension PenjualanPaymentX on _PenjualanScreenState {
     final newNumber = numberRes.data['number'];
 
     ref.read(penjualanProvider.notifier).reset();
+
+    final defaultChannel = _channels.firstWhere(
+      (c) => c['is_default'].toString() == '1',
+      orElse: () =>
+          _channels.isNotEmpty ? _channels.first : {'dim_salestipe_id': 0},
+    );
+    final targetSalesTipeID =
+        int.tryParse(defaultChannel['dim_salestipe_id'].toString()) ?? 0;
+
     ref.read(penjualanProvider.notifier).setInitialData(
           number: newNumber,
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID: int.parse(
-            _channels.first['dim_salestipe_id'].toString(),
-          ),
+          salesTipeID: targetSalesTipeID,
         );
 
     _setState(() {
@@ -785,5 +809,4 @@ extension PenjualanPaymentX on _PenjualanScreenState {
   // ============================================================
   // PENDING PAYMENT
   // ============================================================
-
 }

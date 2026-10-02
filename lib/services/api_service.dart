@@ -5,7 +5,8 @@ import 'session_service.dart';
 
 class ApiService {
   /// URL default (dipakai kalau user belum pernah setting custom URL).
-  static const String defaultBaseUrl = 'https://pos.aibipi.com/api';
+  // static const String defaultBaseUrl = 'https://pos.aibipi.com/api';
+  static const String defaultBaseUrl = 'https://newpos.aibipi.com/api';
 
   static const String _prefsKey = 'custom_base_url';
 

@@ -65,7 +65,8 @@ extension PenjualanDataX on _PenjualanScreenState {
       final shiftUserRes = await _withRetry(
         () => dio.post(
           '/penjualan.php',
-          data: FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
+          data:
+              FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
         ),
       );
 
@@ -257,7 +258,7 @@ extension PenjualanDataX on _PenjualanScreenState {
         }),
       ),
     );
-    final number = numberRes.data['number'];
+    final newNumber = numberRes.data['number'];
 
     final channelRes = await _withRetry(
       () => dio.post(
@@ -288,21 +289,22 @@ extension PenjualanDataX on _PenjualanScreenState {
     // "kebetulan" selalu default — di sini dibuat eksplisit supaya tidak
     // diam-diam salah kalau urutan query backend berubah suatu saat,
     // dengan fallback ke channel pertama kalau tidak ada is_default = 1.
-    final defaultChannel = _channels.isNotEmpty
+    final Map<String, dynamic>? defaultChannel = _channels.isNotEmpty
         ? _channels.firstWhere(
             (c) => c['is_default'].toString() == '1',
             orElse: () => _channels.first,
           )
         : null;
+    final targetSalesTipeID =
+        int.tryParse(defaultChannel?['dim_salestipe_id']?.toString() ?? '') ??
+            0;
 
     ref.read(penjualanProvider.notifier).setInitialData(
-          number: number,
+          number: newNumber,
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID: defaultChannel != null
-              ? int.parse(defaultChannel['dim_salestipe_id'].toString())
-              : 0,
+          salesTipeID: targetSalesTipeID,
         );
 
     // WA banner

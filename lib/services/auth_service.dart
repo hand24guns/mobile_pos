@@ -15,7 +15,7 @@ class AuthService {
       final response = await dio.post(
         '/auth.php',
         data: FormData.fromMap({
-          'action':   'login',
+          'action': 'login',
           'username': username,
           'password': password,
         }),
@@ -24,31 +24,40 @@ class AuthService {
       final data = response.data as Map<String, dynamic>;
 
       if (data['success'] == true) {
-        final outlets = List<int>.from(
-          (data['outlets'] as List? ?? []).map((e) => int.tryParse(e.toString()) ?? 0)
-        ).where((e) => e > 0).toList();
+        final outlets = List<int>.from((data['outlets'] as List? ?? [])
+                .map((e) => int.tryParse(e.toString()) ?? 0))
+            .where((e) => e > 0)
+            .toList();
 
         final menus = List<String>.from(
-          (data['menus'] as List? ?? []).map((e) => e.toString())
-        );
+            (data['menus'] as List? ?? []).map((e) => e.toString()));
 
         await SessionService.saveSession(
-          token:    data['token']    as String,
-          userID:   data['user_id'] is int
-                      ? data['user_id'] as int
-                      : int.tryParse(data['user_id'].toString()) ?? 0,
-          nama:     data['nama']     as String? ?? '',
+          token: data['token'] as String,
+          userID: data['user_id'] is int
+              ? data['user_id'] as int
+              : int.tryParse(data['user_id'].toString()) ?? 0,
+          nama: data['nama'] as String? ?? '',
           username: data['username'] as String? ?? '',
-          outlets:  outlets,
-          menus:    menus,
+          outlets: outlets,
+          menus: menus,
         );
       }
 
       return data;
+    } on DioException catch (e) {
+      // Menangkap pesan eror yang dikirim oleh backend PHP (seperti status 401/400)
+      if (e.response != null && e.response?.data is Map<String, dynamic>) {
+        return e.response!.data as Map<String, dynamic>;
+      }
+      return {
+        'success': false,
+        'message': 'Gagal terhubung ke server. Periksa koneksi internet Anda.',
+      };
     } catch (e) {
       return {
         'success': false,
-        'message': 'Gagal terhubung ke server: $e',
+        'message': 'Terjadi kesalahan sistem: $e',
       };
     }
   }

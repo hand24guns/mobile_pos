@@ -232,11 +232,14 @@ extension PenjualanPendingX on _PenjualanScreenState {
                                 ),
                               );
                               if (del == true) {
+                                if (mounted)
+                                  Navigator.pop(
+                                      context); // Tutup bottom sheet aktif
                                 await _deletePending(
-                                  int.parse(order['id'].toString()),
-                                );
-                                if (mounted) Navigator.pop(context);
-                                await _showRetrieveDialog();
+                                    int.parse(order['id'].toString()));
+                                if (mounted) {
+                                  _showRetrieveDialog(); // Panggil dialog segar dari konteks utama
+                                }
                               }
                             },
                           ),

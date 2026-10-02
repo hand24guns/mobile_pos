@@ -294,7 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'v1.5.0',
+                    'v1.5.1',
                     style: TextStyle(
                       color: Colors.white54,
                       fontSize: 13,
@@ -341,7 +341,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'v1.5.0',
+                'v1.5.1',
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 14,
