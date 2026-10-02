@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
-import '../services/api_service.dart';
 import '../services/session_service.dart';
+import '../services/order_service.dart';
+import '../services/store_service.dart';
+import '../services/shift_service.dart';
 import '../utils/currency_format.dart';
 import '../utils/printer_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +14,8 @@ class InvoiceListScreen extends StatefulWidget {
   final int? initialChannelId;
   final String? initialChannelName;
   final String? initialCaraBayarName;
+  final int? initialStoreId;
+  final String? initialStoreName;
   final DateTime? initialDateFrom;
   final DateTime? initialDateTo;
 
@@ -21,6 +24,8 @@ class InvoiceListScreen extends StatefulWidget {
     this.initialChannelId,
     this.initialChannelName,
     this.initialCaraBayarName,
+    this.initialStoreId,
+    this.initialStoreName,
     this.initialDateFrom,
     this.initialDateTo,
   });
@@ -30,7 +35,6 @@ class InvoiceListScreen extends StatefulWidget {
 }
 
 class _InvoiceListScreenState extends State<InvoiceListScreen> {
-  String _token = '';
   int _userID = 0;
   int _organisasiID = 0;
 
@@ -38,7 +42,6 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   // TIDAK dipakai sebagai sumber data header struk cetak.
   int _activeStoreID = 0;
   bool _isFnB = false;
-  bool _isMultiStore = false;
   bool _isLoading = true;
   DateTime _dateFrom = DateTime.now();
   DateTime _dateTo = DateTime.now();
@@ -126,6 +129,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     if (widget.initialCaraBayarName != null) {
       _selectedCaraBayar = widget.initialCaraBayarName;
     }
+    if (widget.initialStoreId != null) {
+      _selectedStoreId = widget.initialStoreId;
+      _selectedStoreName = widget.initialStoreName;
+    }
     _searchCtrl.addListener(() {
       setState(() {
         _searchQuery = _searchCtrl.text;
@@ -144,73 +151,56 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   Future<void> _loadData() async {
     try {
       final session = await SessionService.getSession();
-      _token = session['token'];
-      _userID = session['user_id'];
-
-      final dio = ApiService.getDio(token: _token);
+      _userID = session['user_id'] ?? 0;
 
       // 1. Ambil daftar store yang accessible
-      final storeRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStores',
-            'user_id': _userID,
-          }));
-      final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
-      _isMultiStore = stores.length > 1;
+      final stores = await StoreService.getStores(userId: _userID);
       _storeOptions = stores;
 
-      // Default ke store pertama
-      _activeStoreID = int.parse(stores.first['id'].toString());
+      if (stores.isNotEmpty) {
+        // Default ke store pertama
+        _activeStoreID =
+            int.tryParse(stores.first['id']?.toString() ?? '') ?? 0;
 
-      final orgRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getOrganisasiID',
-            'store_id': _activeStoreID,
-          }));
-      _organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
-      _isFnB = (orgRes.data['is_fnb'] == 1);
+        final orgData = await StoreService.getOrganisasiId(_activeStoreID);
+        _organisasiID = orgData['organisasi_id'] ?? 0;
+        _isFnB = orgData['is_fnb'] == true;
+      }
 
       // 2. Cek shift aktif user — override activeStoreID & organisasiID
       //    untuk keperluan FILTER INVOICE saja.
-      //    Data header struk (nama, alamat, logo, dll) TIDAK diambil di sini;
-      //    akan di-fetch per-invoice saat user menekan tombol print.
-      final shiftRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'cekShiftUser',
-            'user_id': _userID,
-          }));
-
-      if (shiftRes.data['has_shift'] == true) {
-        _activeStoreID = shiftRes.data['store_id'];
-        _organisasiID = int.parse(shiftRes.data['organisasi_id'].toString());
-        _isFnB = (shiftRes.data['is_fnb'] == 1);
+      final shiftData = await ShiftService.cekShiftUser(userId: _userID);
+      if (shiftData['has_shift'] == true) {
+        _activeStoreID = shiftData['store_id'] ?? _activeStoreID;
+        _organisasiID = shiftData['organisasi_id'] ?? _organisasiID;
+        _isFnB = shiftData['is_fnb'] == true;
       }
 
       await _loadInvoices();
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     } catch (e, stack) {
-      print('ERROR _loadData: $e');
-      print('STACK: $stack');
-      setState(() => _isLoading = false);
+      debugPrint('ERROR _loadData: $e');
+      debugPrint('STACK: $stack');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _loadInvoices() async {
-    final dio = ApiService.getDio(token: _token);
     final dateFrom = _dateFrom.toIso8601String().substring(0, 10);
     final dateTo = _dateTo.toIso8601String().substring(0, 10);
 
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getInvoiceList',
-          'user_id': _userID,
-          'organisasi_id': _organisasiID,
-          'date_from': dateFrom,
-          'date_to': dateTo,
-        }));
+    final invoices = await OrderService.getInvoices(
+      userId: _userID,
+      organisasiId: _organisasiID,
+      storeId: _activeStoreID,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
+
+    if (!mounted) return;
 
     setState(() {
-      _invoices = List<Map<String, dynamic>>.from(res.data['data']);
+      _invoices = invoices;
       _currentPage = 0;
       // Rebuild unique cara_bayar list dari data baru
       final options = _invoices
@@ -300,34 +290,15 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   // ── Hit API trackPrint → kembalikan copyCount ────────────────
   Future<int> _trackPrint(String kode) async {
     try {
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'trackPrint',
-            'kode': kode,
-          }));
-      if (res.data['success'] == true) {
-        return (res.data['count'] as num).toInt();
-      }
-    } catch (_) {}
-    return 1; // fallback: anggap first print agar tidak crash
+      return await OrderService.trackPrint(kode);
+    } catch (_) {
+      return 1; // fallback: anggap first print agar tidak crash
+    }
   }
 
   // ── Ambil items + keterangan transaksi dari API ─────────────
   Future<Map<String, dynamic>> _fetchItems(int invoiceId) async {
-    final dio = ApiService.getDio(token: _token);
-    final res = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getInvoiceDetail',
-          'invoice_id': invoiceId,
-        }));
-    if (res.data['success'] != true) {
-      throw Exception(res.data['message'] ?? 'Invoice tidak bisa dicetak');
-    }
-    return {
-      'items': List<Map<String, dynamic>>.from(res.data['data']),
-      'keterangan': res.data['keterangan'] ?? '',
-    };
+    return await OrderService.getInvoiceDetail(invoiceId);
   }
 
   // ── Fetch store data berdasarkan store_id invoice ────────────
@@ -338,13 +309,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   // tidak peduli user sedang open shift di store mana.
   Future<Map<String, dynamic>> _fetchStoreData(int storeId) async {
     try {
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStoreData',
-            'store_id': storeId,
-          }));
-      return Map<String, dynamic>.from(res.data);
+      return await StoreService.getStoreData(storeId);
     } catch (_) {
       return {};
     }
@@ -566,64 +531,168 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   }
 
   Future<void> _requestVoid(Map<String, dynamic> invoice) async {
-    final TextEditingController notesCtrl = TextEditingController();
-    final confirmed = await showDialog<bool>(
+    final TextEditingController otherCtrl = TextEditingController();
+    String? selectedReason;
+    String? errorMessage;
+
+    const voidReasons = [
+      'Salah Payment',
+      'Salah Item',
+      'Cancel Order',
+      'Salah Channel',
+      'Lainnya',
+    ];
+
+    final String? chosenReason = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.red),
-            SizedBox(width: 8),
-            Text('Request Void', style: TextStyle(fontSize: 16)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Request Void',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Invoice: ${invoice['kode']}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Pilih alasan void:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                RadioGroup<String>(
+                  groupValue: selectedReason,
+                  onChanged: (val) {
+                    setDialogState(() {
+                      selectedReason = val;
+                      errorMessage = null;
+                    });
+                  },
+                  child: Column(
+                    children: voidReasons.map((reason) {
+                      return InkWell(
+                        onTap: () {
+                          setDialogState(() {
+                            selectedReason = reason;
+                            errorMessage = null;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            children: [
+                              Radio<String>(
+                                value: reason,
+                                activeColor: Colors.red,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  reason,
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                if (selectedReason == 'Lainnya') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: otherCtrl,
+                    maxLines: 3,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Keterangan Lainnya',
+                      hintText: 'Masukkan keterangan alasan void...',
+                      border: OutlineInputBorder(),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    onChanged: (_) {
+                      if (errorMessage != null) {
+                        setDialogState(() {
+                          errorMessage = null;
+                        });
+                      }
+                    },
+                  ),
+                ],
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    errorMessage!,
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                if (selectedReason == null) {
+                  setDialogState(() {
+                    errorMessage = 'Pilih salah satu alasan void';
+                  });
+                  return;
+                }
+                if (selectedReason == 'Lainnya') {
+                  final text = otherCtrl.text.trim();
+                  if (text.isEmpty) {
+                    setDialogState(() {
+                      errorMessage = 'Keterangan lainnya tidak boleh kosong';
+                    });
+                    return;
+                  }
+                  Navigator.pop(ctx, text);
+                } else {
+                  Navigator.pop(ctx, selectedReason);
+                }
+              },
+              child: const Text('Kirim Request',
+                  style: TextStyle(color: Colors.white)),
+            ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Invoice: ${invoice['kode']}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            const Text('Masukkan alasan void:', style: TextStyle(fontSize: 13)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: notesCtrl,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'Contoh: transaksi dobel, salah input, dll.',
-                border: OutlineInputBorder(),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              if (notesCtrl.text.trim().isEmpty) return;
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('Kirim Request',
-                style: TextStyle(color: Colors.white)),
-          ),
-        ],
       ),
     );
 
-    if (confirmed != true) return;
-    final notes = notesCtrl.text.trim();
-    if (notes.isEmpty) return;
+    otherCtrl.dispose();
 
-    final dio = ApiService.getDio(token: _token);
+    if (chosenReason == null || chosenReason.trim().isEmpty) return;
+    final notes = chosenReason.trim();
 
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -631,35 +700,40 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     );
 
     try {
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'voidInvoice',
-            'id': invoice['id'],
-            'notes': notes,
-            'userID': _userID,
-          }));
+      final invoiceId = int.tryParse(invoice['id']?.toString() ?? '') ?? 0;
+      final res = await OrderService.voidInvoice(
+        invoiceId: invoiceId,
+        notes: notes,
+        userId: _userID,
+      );
 
       if (mounted) Navigator.pop(context);
 
-      if (res.data['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Request void berhasil dikirim!'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      if (res['success'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(res['message'] ?? 'Request void berhasil dikirim!'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
         await _loadInvoices(); // refresh list — invoice tetap muncul dgn badge "Request Void"
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(res.data['message'] ?? 'Gagal kirim request void')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(res['message'] ?? 'Gagal kirim request void')),
+          );
+        }
       }
     } catch (e) {
       if (mounted) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
     }
   }
 
@@ -871,11 +945,14 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
         _selectedStoreName = null;
       } else {
         _selectedStoreId = picked;
-        final match = _storeOptions.firstWhere(
-          (s) => int.parse(s['id'].toString()) == picked,
-          orElse: () => {},
-        );
-        _selectedStoreName = (match['nama'] ?? match['name'] ?? '').toString();
+        String storeName = '';
+        for (final s in _storeOptions) {
+          if (int.tryParse(s['id']?.toString() ?? '') == picked) {
+            storeName = (s['nama'] ?? s['name'] ?? '').toString();
+            break;
+          }
+        }
+        _selectedStoreName = storeName;
       }
       _currentPage = 0;
     });

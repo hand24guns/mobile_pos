@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:dio/dio.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import '../services/adjustment_service.dart';
 import '../services/session_service.dart';
-import '../services/api_service.dart';
+import '../services/store_service.dart';
 
 // ─── Palette (samakan dengan home_screen.dart) ─────────────────
 const Color _navy = Color(0xFF0D1B3E);
@@ -35,7 +35,6 @@ class AdjustmentScreen extends ConsumerStatefulWidget {
 }
 
 class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
-  String _token = '';
   int _userID = 0;
   List<int> _outlets = [];
   List<Map<String, dynamic>> _storeOptions = [];
@@ -82,8 +81,6 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     super.dispose();
   }
 
-  Dio get _dio => ApiService.getDio(token: _token);
-
   // ============================================================
   // FOKUS SKU — tanpa keyboard (untuk scanner), dipanggil setelah
   // insert produk / pilih store, sama seperti _focusSku() di penjualan
@@ -109,20 +106,13 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     final session = await SessionService.getSession();
     if (!mounted) return;
     setState(() {
-      _token = session['token'] ?? '';
       _userID = session['user_id'] ?? 0;
       _outlets = List<int>.from(session['outlets'] ?? []);
     });
 
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStores',
-            'user_id': _userID,
-          }));
-      if (res.data['success'] == true) {
-        _storeOptions = List<Map<String, dynamic>>.from(res.data['data']);
-      }
+      final stores = await StoreService.getStores(userId: _userID);
+      _storeOptions = stores;
     } catch (_) {}
 
     if (!mounted) return;
@@ -148,75 +138,27 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     });
 
     try {
-      final orgID = await _fetchOrganisasiID(storeID);
-      if (orgID != null) _organisasiID = orgID;
+      final orgData = await StoreService.getOrganisasiId(storeID);
+      if (orgData['organisasi_id'] != null && (orgData['organisasi_id'] as int) > 0) {
+        _organisasiID = orgData['organisasi_id'] as int;
+      }
     } catch (e) {
-      debugPrint('[getOrganisasiID] error: $e');
+      debugPrint('[getOrganisasiId] error: $e');
       if (mounted) _showError('Gagal memuat data organisasi outlet');
     }
 
     try {
-      final number = await _fetchNumberAdjustment(storeID);
+      final number = await AdjustmentService.getAdjustmentNumber(storeID);
       if (number != null && mounted) {
         setState(() => _number = number);
       }
     } catch (e) {
-      debugPrint('[getNumberAdjustment] error: $e');
+      debugPrint('[getAdjustmentNumber] error: $e');
       if (mounted) _showError('Gagal mengambil nomor dokumen');
     }
 
     _loadImageProducts();
     _focusSku();
-  }
-
-  // Pakai ResponseType.plain + manual JSON extraction (sama pola dengan
-  // _loadImageProducts) supaya kalau backend PHP sempat keluarin warning/
-  // notice sebelum JSON, Flutter tetap bisa ambil bagian JSON-nya, bukan
-  // langsung throw FormatException dan bikin error generic di atas.
-  Future<int?> _fetchOrganisasiID(int storeID) async {
-    final res = await _dio.post(
-      '/penjualan.php',
-      data:
-          FormData.fromMap({'action': 'getOrganisasiID', 'store_id': storeID}),
-      options: Options(responseType: ResponseType.plain),
-    );
-    final parsed = _parseJsonPlain(res.data?.toString() ?? '');
-    if (parsed == null || parsed['success'] != true) {
-      debugPrint('[getOrganisasiID] gagal: ${parsed?['message'] ?? res.data}');
-      return null;
-    }
-    return int.tryParse(parsed['organisasi_id'].toString());
-  }
-
-  Future<String?> _fetchNumberAdjustment(int storeID) async {
-    final res = await _dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap(
-          {'action': 'getNumberAdjustment', 'store_id': storeID}),
-      options: Options(responseType: ResponseType.plain),
-    );
-    final parsed = _parseJsonPlain(res.data?.toString() ?? '');
-    if (parsed == null || parsed['success'] != true) {
-      debugPrint(
-          '[getNumberAdjustment] gagal: ${parsed?['message'] ?? res.data}');
-      return null;
-    }
-    return parsed['number']?.toString();
-  }
-
-  Map<String, dynamic>? _parseJsonPlain(String raw) {
-    final jsonStart = raw.indexOf('{');
-    if (jsonStart < 0) {
-      debugPrint('[_parseJsonPlain] respons tidak mengandung JSON: $raw');
-      return null;
-    }
-    try {
-      final decoded = jsonDecode(raw.substring(jsonStart));
-      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
-    } catch (e) {
-      debugPrint('[_parseJsonPlain] gagal decode: $e — raw: $raw');
-      return null;
-    }
   }
 
   // ============================================================
@@ -227,21 +169,18 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     final term = value.trim();
     if (term.isEmpty) return;
 
-    if (_storeID == null) {
+    if (_storeID == null || _organisasiID == null) {
       _showError('Silahkan pilih outlet sebelum input produk');
       setState(() => _skuController.clear());
       return;
     }
 
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'searchProdukAdjustment',
-            'term': term,
-            'organisasi_id': _organisasiID,
-          }));
+      final data = await AdjustmentService.searchProducts(
+        organisasiId: _organisasiID!,
+        term: term,
+      );
 
-      final data = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
       if (data.isEmpty) {
         _showError('Produk "$term" tidak ditemukan');
       } else if (data.length == 1) {
@@ -281,7 +220,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   // di grid, sama seperti _insertProduk di products.dart
   // ============================================================
   Future<void> _insertProduk(String kode) async {
-    if (_storeID == null) {
+    if (_storeID == null || _organisasiID == null) {
       _showError('Silahkan pilih outlet sebelum input produk');
       return;
     }
@@ -293,20 +232,18 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     });
 
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'insertItemAdjustment',
-            'kode': kode,
-            'qty': 1,
-            'number': _number,
-            'organisasi_id': _organisasiID,
-          }));
+      final res = await AdjustmentService.insertItem(
+        number: _number,
+        kode: kode,
+        qty: 1,
+        organisasiId: _organisasiID!,
+      );
 
-      if (res.data['success'] == true) {
+      if (res['success'] == true) {
         await _refreshList();
         await _refreshTotal();
       } else {
-        _showError(res.data['message'] ?? 'Gagal menambahkan produk');
+        _showError(res['message'] ?? 'Gagal menambahkan produk');
       }
     } catch (_) {
       _showError('Terjadi kesalahan sistem');
@@ -326,46 +263,39 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   // LIST & TOTAL
   // ============================================================
   Future<void> _refreshList() async {
-    if (_number.isEmpty) return;
+    if (_number.isEmpty || _organisasiID == null) return;
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getListAdjustment',
-            'number': _number,
-            'organisasi_id': _organisasiID,
-          }));
-      if (mounted && res.data['success'] == true) {
-        setState(
-            () => _items = List<Map<String, dynamic>>.from(res.data['data']));
+      final items = await AdjustmentService.getItems(
+        number: _number,
+        organisasiId: _organisasiID!,
+      );
+      if (mounted) {
+        setState(() => _items = items);
       }
     } catch (_) {}
   }
 
   Future<void> _refreshTotal() async {
-    if (_number.isEmpty) return;
+    if (_number.isEmpty || _organisasiID == null) return;
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getTotalQtyAdjustment',
-            'number': _number,
-            'organisasi_id': _organisasiID,
-          }));
-      if (mounted && res.data['success'] == true) {
-        setState(() => _totalQty = res.data['total_qty'] ?? 0);
+      final total = await AdjustmentService.getTotalQty(
+        number: _number,
+        organisasiId: _organisasiID!,
+      );
+      if (mounted) {
+        setState(() => _totalQty = total);
       }
     } catch (_) {}
   }
 
   Future<void> _updateQty(String kode, int qty) async {
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'updateQtyAdjustment',
-            'kode': kode,
-            'qty': qty,
-            'number': _number,
-          }));
-      if (res.data['success'] == true) {
+      final ok = await AdjustmentService.updateQty(
+        number: _number,
+        kode: kode,
+        qty: qty,
+      );
+      if (ok) {
         await _refreshTotal();
       } else {
         _showError('Update Qty gagal');
@@ -377,15 +307,14 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   }
 
   Future<void> _deleteItem(String kode) async {
+    if (_organisasiID == null) return;
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'deleteItemAdjustment',
-            'kode': kode,
-            'number': _number,
-            'organisasi_id': _organisasiID,
-          }));
-      if (res.data['success'] == true) {
+      final ok = await AdjustmentService.deleteItem(
+        number: _number,
+        kode: kode,
+        organisasiId: _organisasiID!,
+      );
+      if (ok) {
         await _refreshList();
         await _refreshTotal();
       } else {
@@ -405,41 +334,10 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     if (_isLoadingImages || _organisasiID == null) return;
     setState(() => _isLoadingImages = true);
     try {
-      final rawRes = await _dio
-          .post(
-            '/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getImageProductsAdjustment',
-              'organisasi_id': _organisasiID,
-            }),
-            options: Options(responseType: ResponseType.plain),
-          )
-          .timeout(const Duration(seconds: 12));
-
-      final rawStr = rawRes.data?.toString() ?? '';
-      final jsonStart = rawStr.indexOf('{');
-      if (jsonStart < 0) return;
-
-      final parsed = jsonDecode(rawStr.substring(jsonStart)) as Map;
-      final rawData = parsed['data'];
-      if (rawData is List) {
-        final categories = rawData
-            .map<Map<String, dynamic>>((cat) => {
-                  'id': cat['id'] ?? 0,
-                  'nama': cat['nama']?.toString() ?? '',
-                  'produk': (cat['produk'] as List? ?? [])
-                      .map<Map<String, dynamic>>((p) => {
-                            'kode': p['kode']?.toString() ?? '',
-                            'nama': p['nama']?.toString() ?? '',
-                            'image': p['image']?.toString() ?? '',
-                          })
-                      .where((p) => p['image']!.isNotEmpty)
-                      .toList(),
-                })
-            .where((cat) => (cat['produk'] as List).isNotEmpty)
-            .toList();
-        if (mounted) setState(() => _imageCategories = categories);
-      }
+      final categories = await AdjustmentService.getImageProducts(
+        organisasiId: _organisasiID!,
+      );
+      if (mounted) setState(() => _imageCategories = categories);
     } catch (_) {
     } finally {
       if (mounted) setState(() => _isLoadingImages = false);
@@ -450,7 +348,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   // SIMPAN
   // ============================================================
   Future<void> _simpan() async {
-    if (_storeID == null) {
+    if (_storeID == null || _organisasiID == null) {
       _showError('Outlet belum dipilih');
       return;
     }
@@ -461,19 +359,17 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
 
     setState(() => _saving = true);
     try {
-      final res = await _dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'simpanAdjustment',
-            'store_id': _storeID,
-            'organisasi_id': _organisasiID,
-            'tanggal': _formatDate(_tanggal),
-            'number': _number,
-            'tipe': _tipe,
-          }));
+      final res = await AdjustmentService.submitAdjustment(
+        storeId: _storeID!,
+        organisasiId: _organisasiID!,
+        tanggal: _formatDate(_tanggal),
+        number: _number,
+        tipe: _tipe,
+      );
 
       if (!mounted) return;
 
-      if (res.data['success'] == true) {
+      if (res['success'] == true) {
         await showDialog(
           context: context,
           builder: (_) => AlertDialog(
@@ -490,7 +386,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
         );
         if (mounted) Navigator.pop(context);
       } else {
-        _showError(res.data['message'] ?? 'Gagal menyimpan transaksi');
+        _showError(res['message'] ?? 'Gagal menyimpan transaksi');
       }
     } catch (_) {
       _showError('Terjadi kesalahan sistem');
@@ -938,13 +834,38 @@ class _AdjustmentImageTileState extends State<_AdjustmentImageTile> {
     if (_attempt >= _maxAutoRetry) return;
     Future.delayed(Duration(seconds: 2 * (_attempt + 1)), () {
       if (!mounted) return;
-      _adjustmentImageCacheManager.removeFile(widget.imageUrl);
+      if (!kIsWeb) {
+        _adjustmentImageCacheManager.removeFile(widget.imageUrl);
+      }
       setState(() => _attempt++);
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb) {
+      return Image.network(
+        widget.imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          _scheduleRetry();
+          final stillTrying = _attempt < _maxAutoRetry;
+          return Container(
+            color: Colors.grey.shade200,
+            child: Icon(stillTrying ? Icons.wifi_off_rounded : Icons.broken_image,
+                color: Colors.grey, size: 22),
+          );
+        },
+        loadingBuilder: (_, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            color: Colors.grey.shade100,
+            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        },
+      );
+    }
+
     return CachedNetworkImage(
       key: ValueKey('${widget.imageUrl}_$_attempt'),
       imageUrl: widget.imageUrl,

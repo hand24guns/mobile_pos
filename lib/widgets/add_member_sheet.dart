@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
-import '../services/api_service.dart';
+import '../services/pos_data_service.dart';
 
 // ============================================================
 // AddMemberSheet
@@ -79,18 +78,14 @@ class _AddMemberSheetState extends State<AddMemberSheet> {
     setState(() => _isSaving = true);
 
     try {
-      final dio = ApiService.getDio(token: widget.token);
-
       // ── Step 1: Cek duplikat HP ──────────────────────────
-      final cekRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action':        'cekHPMember',
-            'hp':            hp,
-            'organisasi_id': widget.organisasiID,
-          }));
+      final cekRes = await PosDataService.checkMemberHp(
+        hp: hp,
+        organisasiId: widget.organisasiID,
+      );
 
-      if (cekRes.data['success'] == true) {
-        final namaExist = cekRes.data['nama'] ?? '';
+      if (cekRes['success'] == true) {
+        final namaExist = cekRes['nama'] ?? '';
         if (mounted) {
           _showError('No HP sudah terdaftar atas nama $namaExist');
         }
@@ -99,26 +94,24 @@ class _AddMemberSheetState extends State<AddMemberSheet> {
       }
 
       // ── Step 2: Insert member ─────────────────────────────
-      final insertRes = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action':        'insertMember',
-            'nama':          nama,
-            'hp':            hp,
-            'email':         email,
-            'ig':            ig,
-            'tgl_lahir':     tgl,
-            'organisasi_id': widget.organisasiID,
-          }));
+      final insertRes = await PosDataService.createMember(
+        nama: nama,
+        hp: hp,
+        email: email,
+        ig: ig,
+        tglLahir: tgl,
+        organisasiId: widget.organisasiID,
+      );
 
-      if (insertRes.data['success'] == true) {
-        final newID = int.parse(insertRes.data['id'].toString());
+      if (insertRes['success'] == true) {
+        final newID = int.parse(insertRes['id'].toString());
 
         if (mounted) {
           Navigator.pop(context); // tutup sheet
           widget.onSuccess(newID, '$nama - $hp', nama);
         }
       } else {
-        _showError('Gagal menyimpan member. Coba lagi.');
+        _showError(insertRes['message']?.toString() ?? 'Gagal menyimpan member. Coba lagi.');
       }
     } catch (e) {
       _showError('Terjadi kesalahan: $e');

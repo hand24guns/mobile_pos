@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import '../services/session_service.dart';
-import '../services/api_service.dart';
+import '../services/auth_service.dart';
+import '../services/dashboard_service.dart';
 import '../utils/printer_helper.dart';
 import 'penjualan/penjualan_screen.dart';
 import 'invoice_list_screen.dart';
@@ -304,32 +303,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _loadStats() async {
-    if (_outlets.isEmpty) return;
     if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
-      final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {'action': 'getDashboard', 'store_ids': _outlets.join(',')},
-      ).timeout(const Duration(seconds: 10));
+      final stats = await DashboardService.getStats(storeIds: _outlets);
 
       if (!mounted) return;
 
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
-        setState(() {
-          _invoiceHariIni = data['invoice_count'] ?? 0;
-          _totalPenjualan = (data['total_penjualan'] as num?)?.toDouble() ?? 0;
-        });
-      }
+      setState(() {
+        if (_outlets.isEmpty && stats.storeIds.isNotEmpty) {
+          _outlets = stats.storeIds;
+        }
+        _invoiceHariIni = stats.invoiceCount;
+        _totalPenjualan = stats.totalPenjualan;
+      });
     } catch (_) {
       // Gagal fetch — biarkan nilai 0, user bisa pull-to-refresh
     } finally {
@@ -366,7 +354,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
     if (confirm == true && mounted) {
-      await SessionService.clearSession();
+      await AuthService.logout();
+      if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -1283,11 +1272,6 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
     super.dispose();
   }
 
-  // Dikirim ke penjualan.php (bukan auth.php) karena di sinilah
-  // validateToken() sudah dijalankan dan $userID di-resolve dari
-  // token — persis pola yang dipakai semua action lain
-  // (CartHandler, MasterHandler, dst). Handler-nya ada di
-  // MasterHandler.php, action 'changePassword'.
   Future<void> _submit() async {
     if (!_isValid || _isSaving) return;
     setState(() {
@@ -1296,33 +1280,23 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
     });
 
     try {
-      final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'changePassword',
-          'password': _passwordCtrl.text,
-          'password_confirmation': _rePasswordCtrl.text,
-        },
-      ).timeout(const Duration(seconds: 10));
+      final result = await AuthService.changePassword(
+        password: _passwordCtrl.text,
+        passwordConfirmation: _rePasswordCtrl.text,
+      );
 
       if (!mounted) return;
 
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
+      if (result['success'] == true) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Password berhasil diubah')),
+          SnackBar(
+            content: Text(result['message'] ?? 'Password berhasil diubah'),
+          ),
         );
       } else {
         setState(() {
-          _errorText = data['message'] ?? 'Gagal mengubah password';
+          _errorText = result['message'] ?? 'Gagal mengubah password';
         });
       }
     } catch (_) {

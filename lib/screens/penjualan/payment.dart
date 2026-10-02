@@ -75,12 +75,29 @@ extension PenjualanPaymentX on _PenjualanScreenState {
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Batal'),
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1D273B),
-            ),
-            child: const Text('Proses', style: TextStyle(color: Colors.white)),
+          StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              bool isSubmitting = false;
+              return ElevatedButton(
+                onPressed: isSubmitting
+                    ? null
+                    : () {
+                        setDialogState(() => isSubmitting = true);
+                        Navigator.pop(context, true);
+                      },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1D273B)),
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Proses',
+                        style: TextStyle(color: Colors.white)),
+              );
+            },
           ),
         ],
       ),
@@ -96,32 +113,27 @@ extension PenjualanPaymentX on _PenjualanScreenState {
 
     try {
       final session = await SessionService.getSession();
-      final dio = ApiService.getDio(token: _token);
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'prosesBayar',
-          'number': state.number,
-          'cara_bayar_id': state.caraBayarID,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'user_id': session['user_id'],
-          'sales_tipe_id': state.salesTipeID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'retur_source': ref.read(penjualanProvider).returSource,
-          'nominal_bayar': state.nominalBayar,
-          'device_token': _deviceToken,
-          'keterangan': _keteranganController.text.trim(),
-          'pending_order_id': _activePendingOrderID ?? 0,
-        }),
+      final res = await OrderService.checkoutOrder(
+        number: state.number,
+        caraBayarId: state.caraBayarID,
+        storeId: state.storeID,
+        organisasiId: state.organisasiID,
+        userId: session['user_id'],
+        salesTipeId: state.salesTipeID,
+        memberId: state.memberID ?? 0,
+        voucher: _activeVoucher,
+        returSource: ref.read(penjualanProvider).returSource,
+        nominalBayar: state.nominalBayar,
+        deviceToken: _deviceToken,
+        keterangan: _keteranganController.text.trim(),
+        pendingOrderId: _activePendingOrderID ?? 0,
       );
 
       if (mounted) Navigator.pop(context); // tutup loading
 
-      if (res.data['success'] == true) {
-        final kembalian = res.data['kembalian'];
+      if (res['success'] == true) {
+        final kembalian = res['kembalian'];
 
         _kirimWADanEmail(
           invoiceNumber: state.number,
@@ -235,7 +247,7 @@ extension PenjualanPaymentX on _PenjualanScreenState {
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(res.data['message'] ?? 'Transaksi gagal')),
+            SnackBar(content: Text(res['message'] ?? 'Transaksi gagal')),
           );
         }
       }
@@ -259,64 +271,49 @@ extension PenjualanPaymentX on _PenjualanScreenState {
     required int? memberID,
   }) async {
     if (memberID == null || memberID == 0) return;
-    final dio = ApiService.getDio(token: _token);
 
-    dio
-        .post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'kirimWA',
-            'number': invoiceNumber,
-            'store_id': storeID,
-            'organisasi_id': organisasiID,
-            'member_id': memberID,
-          }),
-        )
-        .then((_) {})
-        .catchError((_) {});
+    OrderService.sendReceiptWhatsApp(
+      invoiceNumber: invoiceNumber,
+      storeId: storeID,
+      organisasiId: organisasiID,
+      memberId: memberID,
+    );
 
-    dio
-        .post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'kirimEmail',
-            'number': invoiceNumber,
-            'store_id': storeID,
-            'organisasi_id': organisasiID,
-            'member_id': memberID,
-          }),
-        )
-        .then((_) {})
-        .catchError((_) {});
+    OrderService.sendReceiptEmail(
+      invoiceNumber: invoiceNumber,
+      storeId: storeID,
+      organisasiId: organisasiID,
+      memberId: memberID,
+    );
   }
 
   Future<void> _resetTransaksi() async {
-    final dio = ApiService.getDio(token: _token);
     final currentState = ref.read(penjualanProvider);
     final storeID = currentState.storeID;
     final storeName = currentState.storeName;
     final organisasiID = currentState.organisasiID;
 
-    final numberRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getNumber',
-        'store_id': storeID,
-        'organisasi_id': organisasiID,
-        'device_token': _deviceToken,
-      }),
+    final newNumber = await PosDataService.getNextOrderNumber(
+      storeId: storeID,
+      deviceToken: _deviceToken,
     );
-    final newNumber = numberRes.data['number'];
 
     ref.read(penjualanProvider.notifier).reset();
+
+    final defaultChannel = _channels.firstWhere(
+      (c) => c['is_default'].toString() == '1',
+      orElse: () =>
+          _channels.isNotEmpty ? _channels.first : {'dim_salestipe_id': 0},
+    );
+    final targetSalesTipeID =
+        int.tryParse(defaultChannel['dim_salestipe_id'].toString()) ?? 0;
+
     ref.read(penjualanProvider.notifier).setInitialData(
           number: newNumber,
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID: int.parse(
-            _channels.first['dim_salestipe_id'].toString(),
-          ),
+          salesTipeID: targetSalesTipeID,
         );
 
     _setState(() {
@@ -392,24 +389,15 @@ extension PenjualanPaymentX on _PenjualanScreenState {
       }
 
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
+      final storeData = await StoreService.getStoreData(state.storeID);
 
-      // ── Ambil data store ─────────────────────────────────────
-      final storeRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getStoreData',
-          'store_id': state.storeID,
-        }),
-      );
-
-      final storeName = storeRes.data['nama'] ?? '';
-      final storeAddress = storeRes.data['alamat'] ?? '';
-      final storeNpwp = storeRes.data['npwp'] ?? '';
-      final invoiceNote = storeRes.data['invoice_note'] ?? '';
-      final storeTax = (storeRes.data['tax'] as num? ?? 0).toDouble();
-      final logoFileName = storeRes.data['logo_file_name'] ?? '';
-      final logoUrl = storeRes.data['logo_url'] ?? '';
+      final storeName = storeData['nama'] ?? '';
+      final storeAddress = storeData['alamat'] ?? '';
+      final storeNpwp = storeData['npwp'] ?? '';
+      final invoiceNote = storeData['invoice_note'] ?? '';
+      final storeTax = (storeData['tax'] as num? ?? 0).toDouble();
+      final logoFileName = storeData['logo_file_name'] ?? '';
+      final logoUrl = storeData['logo_url'] ?? '';
       // isFnb: dibaca dari state yang sudah di-set saat load awal
       // (jasa_perusahaan == 3 di dim_organisasi → FnB/resto)
       final isFnb = _isFnb;
@@ -719,15 +707,8 @@ extension PenjualanPaymentX on _PenjualanScreenState {
         await PrinterHelper.connect(savedMac);
       }
 
-      final dio = ApiService.getDio(token: _token);
-      final storeRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getStoreData',
-          'store_id': currentState.storeID,
-        }),
-      );
-      final storeName = storeRes.data['nama'] ?? '';
+      final storeRes = await StoreService.getStoreData(currentState.storeID);
+      final storeName = storeRes['nama'] ?? '';
 
       // (keteranganTrx sudah ditangkap di awal fungsi — lihat atas)
 
@@ -785,5 +766,4 @@ extension PenjualanPaymentX on _PenjualanScreenState {
   // ============================================================
   // PENDING PAYMENT
   // ============================================================
-
 }

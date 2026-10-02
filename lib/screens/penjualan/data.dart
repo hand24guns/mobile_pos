@@ -59,27 +59,23 @@ extension PenjualanDataX on _PenjualanScreenState {
       _userID = session['user_id'];
       _deviceToken = await SessionService.getDeviceToken();
 
-      final dio = ApiService.getDio(token: _token);
-
       // Cek apakah user sudah punya shift aktif
-      final shiftUserRes = await _withRetry(
-        () => dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
-        ),
+      final shiftUserData = await _withRetry(
+        () => ShiftService.cekShiftUser(userId: _userID),
       );
 
       int storeID = 0;
       int organisasiID = 0;
       String storeName = '';
 
-      if (shiftUserRes.data['has_shift'] == true) {
+      if (shiftUserData['has_shift'] == true) {
         // User sudah punya shift → ambil data store dari shift
-        storeID = shiftUserRes.data['store_id'];
-        organisasiID = shiftUserRes.data['organisasi_id'];
-        storeName = shiftUserRes.data['store_nama'];
-        _shiftID = shiftUserRes.data['shift_id'];
-        _isFnb = (shiftUserRes.data['is_fnb'] as int? ?? 0) == 1;
+        storeID = int.tryParse(shiftUserData['store_id']?.toString() ?? '') ?? 0;
+        organisasiID =
+            int.tryParse(shiftUserData['organisasi_id']?.toString() ?? '') ?? 0;
+        storeName = shiftUserData['store_nama']?.toString() ?? '';
+        _shiftID = int.tryParse(shiftUserData['shift_id']?.toString() ?? '') ?? 0;
+        _isFnb = shiftUserData['is_fnb'] == true;
 
         _activeStoreID = storeID;
         _activeOrgID = organisasiID;
@@ -87,20 +83,15 @@ extension PenjualanDataX on _PenjualanScreenState {
 
         // Langsung load data POS — tidak perlu cek shift lagi
         await _loadPosData(
-          dio: dio,
           storeID: storeID,
           organisasiID: organisasiID,
           storeName: storeName,
         );
       } else {
         // Belum punya shift → pilih store dulu, lalu shift check
-        final storeRes = await _withRetry(
-          () => dio.post(
-            '/penjualan.php',
-            data: FormData.fromMap({'action': 'getStores', 'user_id': _userID}),
-          ),
+        final stores = await _withRetry(
+          () => StoreService.getStores(userId: _userID),
         );
-        final stores = List<Map<String, dynamic>>.from(storeRes.data['data']);
 
         Map<String, dynamic>? pickedStore;
         if (stores.length == 1) {
@@ -119,16 +110,10 @@ extension PenjualanDataX on _PenjualanScreenState {
         storeName = pickedStore['nama'].toString();
 
         final orgRes = await _withRetry(
-          () => dio.post(
-            '/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getOrganisasiID',
-              'store_id': storeID,
-            }),
-          ),
+          () => StoreService.getOrganisasiId(storeID),
         );
-        organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
-        _isFnb = (orgRes.data['is_fnb'] as int? ?? 0) == 1;
+        organisasiID = int.tryParse(orgRes['organisasi_id']?.toString() ?? '') ?? 0;
+        _isFnb = orgRes['is_fnb'] == true;
 
         _activeStoreID = storeID;
         _activeOrgID = organisasiID;
@@ -137,7 +122,6 @@ extension PenjualanDataX on _PenjualanScreenState {
         // Phase 2 — shift check + buka shift jika perlu
         if (!mounted) return;
         await _checkAndEnsureShift(
-          dio: dio,
           storeID: storeID,
           organisasiID: organisasiID,
           storeName: storeName,
@@ -166,7 +150,6 @@ extension PenjualanDataX on _PenjualanScreenState {
   // PHASE 2 — Cek shift, buka jika belum ada
   // ============================================================
   Future<void> _checkAndEnsureShift({
-    required Dio dio,
     required int storeID,
     required int organisasiID,
     required String storeName,
@@ -225,7 +208,6 @@ extension PenjualanDataX on _PenjualanScreenState {
     // Shift OK (tidakAda → sudah dibuka, atau milikSaya dari cekShift)
     if (!mounted) return;
     await _loadPosData(
-      dio: dio,
       storeID: storeID,
       organisasiID: organisasiID,
       storeName: storeName,
@@ -237,50 +219,27 @@ extension PenjualanDataX on _PenjualanScreenState {
   // Dipanggil setelah shift dipastikan ada.
   // ============================================================
   Future<void> _loadPosData({
-    required Dio dio,
     required int storeID,
     required int organisasiID,
     required String storeName,
   }) async {
-    // getNumber/getChannels/getCaraBayar adalah data WAJIB sebelum
-    // kasir bisa transaksi (nomor invoice, pilihan channel, pilihan
-    // cara bayar) — makanya dibungkus _withRetry, bukan getStoreData
-    // di bawah yang sifatnya cuma banner tambahan (WA disconnect) dan
-    // memang boleh diam kalau gagal.
-    final numberRes = await _withRetry(
-      () => dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getNumber',
-          'store_id': storeID,
-          'device_token': _deviceToken,
-        }),
+    final newNumber = await _withRetry(
+      () => PosDataService.getNextOrderNumber(
+        storeId: storeID,
+        deviceToken: _deviceToken,
       ),
     );
-    final number = numberRes.data['number'];
 
-    final channelRes = await _withRetry(
-      () => dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getChannels',
-          'organisasi_id': organisasiID,
-        }),
+    _channels = await _withRetry(
+      () => PosDataService.getChannels(
+        organisasiId: organisasiID,
       ),
     );
-    _channels = List<Map<String, dynamic>>.from(channelRes.data['data'] ?? []);
 
-    final caraBayarRes = await _withRetry(
-      () => dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getCaraBayar',
-          'organisasi_id': organisasiID,
-        }),
+    _caraBayarList = await _withRetry(
+      () => PosDataService.getCaraBayar(
+        organisasiId: organisasiID,
       ),
-    );
-    _caraBayarList = List<Map<String, dynamic>>.from(
-      caraBayarRes.data['data'] ?? [],
     );
 
     // Channel awal = yang is_default = 1. Backend (getChannels) memang
@@ -288,31 +247,29 @@ extension PenjualanDataX on _PenjualanScreenState {
     // "kebetulan" selalu default — di sini dibuat eksplisit supaya tidak
     // diam-diam salah kalau urutan query backend berubah suatu saat,
     // dengan fallback ke channel pertama kalau tidak ada is_default = 1.
-    final defaultChannel = _channels.isNotEmpty
+    final Map<String, dynamic>? defaultChannel = _channels.isNotEmpty
         ? _channels.firstWhere(
             (c) => c['is_default'].toString() == '1',
             orElse: () => _channels.first,
           )
         : null;
+    final targetSalesTipeID =
+        int.tryParse(defaultChannel?['dim_salestipe_id']?.toString() ?? '') ??
+            0;
 
     ref.read(penjualanProvider.notifier).setInitialData(
-          number: number,
+          number: newNumber,
           storeID: storeID,
           storeName: storeName,
           organisasiID: organisasiID,
-          salesTipeID: defaultChannel != null
-              ? int.parse(defaultChannel['dim_salestipe_id'].toString())
-              : 0,
+          salesTipeID: targetSalesTipeID,
         );
 
     // WA banner
     try {
-      final storeDataRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({'action': 'getStoreData', 'store_id': storeID}),
-      );
+      final storeData = await StoreService.getStoreData(storeID);
       _waDisconnected =
-          (storeDataRes.data['wa_disconnected'] as num? ?? 0).toInt();
+          (storeData['wa_disconnected'] as num? ?? 0).toInt();
     } catch (_) {}
 
     if (mounted) _setState(() => _isLoading = false);

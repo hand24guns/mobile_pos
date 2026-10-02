@@ -1,9 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import '../../services/session_service.dart';
-import '../../services/api_service.dart';
+import '../../services/store_service.dart';
 
 const Color _navy = Color(0xFF0D1B3E);
 const Color _blue = Color(0xFF2563EB);
@@ -60,34 +57,18 @@ class _OutletSettingScreenState extends State<OutletSettingScreen> {
     });
 
     try {
-      final token = await SessionService.getToken() ?? '';
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {'action': 'getOutletSetting'},
-      ).timeout(const Duration(seconds: 10));
-
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
-        final stores = List<Map<String, dynamic>>.from(
-          (data['stores'] as List).map((e) => Map<String, dynamic>.from(e)),
-        );
-        if (!mounted) return;
+      final stores = await StoreService.getOutletSettings();
+      if (!mounted) return;
+      if (stores.isNotEmpty) {
         setState(() {
           _stores = stores;
           _loading = false;
         });
-        if (stores.isNotEmpty) {
-          _selectStore(stores.first['dim_divisi_id'] as int);
-        }
+        _selectStore(stores.first['dim_divisi_id'] as int);
       } else {
-        if (!mounted) return;
         setState(() {
           _loading = false;
-          _error = data['message'] ?? 'Gagal memuat data outlet';
+          _error = 'Tidak ada outlet yang dapat diakses';
         });
       }
     } catch (_) {
@@ -130,28 +111,18 @@ class _OutletSettingScreenState extends State<OutletSettingScreen> {
 
     setState(() => _saving = true);
     try {
-      final token = await SessionService.getToken() ?? '';
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'updateOutletSetting',
-          'store_id': _selectedStoreId.toString(),
-          'telp': telp,
-          'alamat': _alamatCtrl.text.trim(),
-          'npwp': _npwpCtrl.text.trim(),
-          'wa': _waAktif ? '1' : '0',
-          'tax': _taxCtrl.text.trim().isEmpty ? '0' : _taxCtrl.text.trim(),
-          'note': _noteCtrl.text.trim(),
-        },
-      ).timeout(const Duration(seconds: 10));
+      final res = await StoreService.updateOutletSetting(
+        storeId: _selectedStoreId!,
+        telp: telp,
+        alamat: _alamatCtrl.text.trim(),
+        npwp: _npwpCtrl.text.trim(),
+        wa: _waAktif,
+        tax: double.tryParse(_taxCtrl.text.trim()) ?? 0,
+        note: _noteCtrl.text.trim(),
+      );
 
-      final data = jsonDecode(response.body);
       if (!mounted) return;
-      if (data['success'] == true) {
+      if (res['success'] == true) {
         _showSnack('Data outlet berhasil disimpan');
         final idx = _stores.indexWhere(
           (e) => e['dim_divisi_id'] == _selectedStoreId,
@@ -168,8 +139,10 @@ class _OutletSettingScreenState extends State<OutletSettingScreen> {
           };
         }
       } else {
-        _showSnack(data['message'] ?? 'Gagal menyimpan data outlet',
-            isError: true);
+        _showSnack(
+          res['message'] ?? 'Gagal menyimpan data outlet',
+          isError: true,
+        );
       }
     } catch (_) {
       if (!mounted) return;

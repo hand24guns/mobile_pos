@@ -1,11 +1,19 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../screens/login_screen.dart';
 import 'session_service.dart';
 
 class ApiService {
+  /// Global navigator key untuk navigasi tanpa BuildContext (misal auto-logout saat token 401 expired).
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
+
   /// URL default (dipakai kalau user belum pernah setting custom URL).
-  static const String defaultBaseUrl = 'https://pos.aibipi.com/api';
+  // static const String defaultBaseUrl = 'https://pos.aibipi.com/api';
+  static const String defaultBaseUrl = 'http://newpos.test/api/';
+  // static const String defaultBaseUrl = 'https://newpos.aibipi.com/api/';
 
   static const String _prefsKey = 'custom_base_url';
 
@@ -76,15 +84,62 @@ class ApiService {
     return '$origin/dist/img/produk/';
   }
 
+  /// Instance Dio terkonfigurasi dengan BaseOptions, Auth Interceptor,
+  /// 401 Unauthorized Interceptor, dan Debug Logger.
   static Dio getDio({String? token}) {
+    final headers = <String, dynamic>{
+      'Accept': 'application/json',
+    };
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
     final options = BaseOptions(
       baseUrl: _baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 10),
-      headers: token != null ? {'Authorization': 'Bearer $token'} : {},
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+      headers: headers,
     );
 
     final dio = Dio(options);
+
+    // Auth & 401 Interceptors
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          // Jika token belum ada di header request, ambil otomatis dari SessionService
+          if (!options.headers.containsKey('Authorization') ||
+              options.headers['Authorization'] == null ||
+              options.headers['Authorization'].toString().isEmpty) {
+            final savedToken = await SessionService.getToken();
+            if (savedToken != null && savedToken.isNotEmpty) {
+              options.headers['Authorization'] = 'Bearer $savedToken';
+            }
+          }
+          return handler.next(options);
+        },
+        onError: (DioException error, handler) async {
+          // Tangani 401 Unauthorized
+          if (error.response?.statusCode == 401) {
+            final path = error.requestOptions.path;
+            final isLoginEndpoint =
+                path.contains('/auth/login') || path.contains('auth.php');
+
+            // Hanya auto-logout bila 401 bukan dari endpoint login
+            if (!isLoginEndpoint) {
+              await SessionService.clearSession();
+              if (navigatorKey.currentState != null) {
+                navigatorKey.currentState!.pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              }
+            }
+          }
+          return handler.next(error);
+        },
+      ),
+    );
 
     // Interceptor untuk debug — HANYA aktif di debug build, supaya
     // response.body (yang berisi token saat login) dan header lain

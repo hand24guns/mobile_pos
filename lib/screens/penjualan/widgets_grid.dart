@@ -35,13 +35,43 @@ class _ProductImageTileState extends State<_ProductImageTile> {
       if (!mounted) return;
       // Buang entry gagal dari cache manager supaya percobaan berikutnya
       // benar-benar fetch ulang ke server, bukan mengembalikan error yang sama.
-      productImageCacheManager.removeFile(widget.imageUrl);
+      if (!kIsWeb) {
+        productImageCacheManager.removeFile(widget.imageUrl);
+      }
       setState(() => _attempt++);
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb) {
+      return Image.network(
+        widget.imageUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, error, ___) {
+          _scheduleRetry();
+          final stillTrying = _attempt < _maxAutoRetry;
+          return Container(
+            color: Colors.grey.shade200,
+            child: Icon(
+              stillTrying ? Icons.wifi_off_rounded : Icons.broken_image,
+              color: Colors.grey,
+              size: 28,
+            ),
+          );
+        },
+        loadingBuilder: (_, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            color: Colors.grey.shade100,
+            child: const Center(
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        },
+      );
+    }
+
     return CachedNetworkImage(
       // Key berubah tiap percobaan → widget dianggap baru oleh Flutter,
       // memaksa CachedNetworkImage benar-benar resolve ulang, bukan

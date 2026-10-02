@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
-import '../../services/api_service.dart';
-import '../../services/session_service.dart';
+import '../../services/petty_cash_service.dart';
+import '../../services/store_service.dart';
 import 'petikes_entry_screen.dart';
 
 // ─── Palette (disamakan dengan home_screen.dart, ditambah aksen dari
@@ -38,7 +37,6 @@ class KasKecilScreen extends StatefulWidget {
 }
 
 class _KasKecilScreenState extends State<KasKecilScreen> {
-  String _token = '';
   int _organisasiID = 0;
   int? _selectedStoreId;
 
@@ -59,9 +57,6 @@ class _KasKecilScreenState extends State<KasKecilScreen> {
 
   Future<void> _init() async {
     try {
-      final session = await SessionService.getSession();
-      _token = session['token'];
-
       if (_selectedStoreId != null) {
         await _loadOrganisasi(_selectedStoreId!);
         await _loadData();
@@ -78,13 +73,8 @@ class _KasKecilScreenState extends State<KasKecilScreen> {
   // store terpilih lewat action getOrganisasiID (MasterHandler.php),
   // sama seperti pola di invoice_list_screen.dart.
   Future<void> _loadOrganisasi(int storeId) async {
-    final dio = ApiService.getDio(token: _token);
-    final orgRes = await dio.post('/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'getOrganisasiID',
-          'store_id': storeId,
-        }));
-    _organisasiID = int.parse(orgRes.data['organisasi_id'].toString());
+    final orgData = await StoreService.getOrganisasiId(storeId);
+    _organisasiID = (orgData['organisasi_id'] as int?) ?? 0;
   }
 
   Future<void> _onStoreChanged(int? storeId) async {
@@ -115,27 +105,24 @@ class _KasKecilScreenState extends State<KasKecilScreen> {
     });
 
     try {
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getPetikesList',
-            'store_id': _selectedStoreId,
-            'organisasi_id': _organisasiID,
-            'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
-            'end_date': DateFormat('yyyy-MM-dd').format(_endDate),
-          }));
+      final res = await PettyCashService.getPettyCashList(
+        storeId: _selectedStoreId!,
+        organisasiId: _organisasiID,
+        startDate: DateFormat('yyyy-MM-dd').format(_startDate),
+        endDate: DateFormat('yyyy-MM-dd').format(_endDate),
+      );
 
       if (!mounted) return;
 
-      if (res.data['success'] == true) {
+      if (res['success'] == true) {
         setState(() {
           _dataPerTanggal =
-              List<Map<String, dynamic>>.from(res.data['data'] ?? []);
-          _saldoTotal = double.tryParse('${res.data['saldo_total'] ?? 0}') ?? 0;
+              List<Map<String, dynamic>>.from(res['data'] ?? []);
+          _saldoTotal = (res['saldo_total'] as num?)?.toDouble() ?? 0.0;
         });
       } else {
         setState(() => _errorMessage =
-            res.data['message'] ?? 'Gagal memuat data kas kecil.');
+            res['message']?.toString() ?? 'Gagal memuat data kas kecil.');
       }
     } catch (_) {
       if (!mounted) return;
@@ -205,19 +192,14 @@ class _KasKecilScreenState extends State<KasKecilScreen> {
     if (confirm != true) return;
 
     try {
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'voidPetikes',
-            'payment_id': paymentID,
-          }));
+      final res = await PettyCashService.voidPettyCash(paymentId: paymentID);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.data['message'] ?? '')),
+        SnackBar(content: Text(res['message']?.toString() ?? '')),
       );
 
-      if (res.data['success'] == true) {
+      if (res['success'] == true) {
         _loadData();
       }
     } catch (_) {
@@ -236,7 +218,7 @@ class _KasKecilScreenState extends State<KasKecilScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) =>
-          _JurnalSheet(token: _token, paymentID: paymentID, kode: kode),
+          _JurnalSheet(paymentID: paymentID, kode: kode),
     );
   }
 
@@ -876,12 +858,11 @@ class _KasKecilScreenState extends State<KasKecilScreen> {
 
 // ─── Bottom sheet: detail jurnal + foto nota ───────────────────
 class _JurnalSheet extends StatefulWidget {
-  final String token;
   final int paymentID;
   final String kode;
 
   const _JurnalSheet(
-      {required this.token, required this.paymentID, required this.kode});
+      {required this.paymentID, required this.kode});
 
   @override
   State<_JurnalSheet> createState() => _JurnalSheetState();
@@ -902,19 +883,16 @@ class _JurnalSheetState extends State<_JurnalSheet> {
 
   Future<void> _load() async {
     try {
-      final dio = ApiService.getDio(token: widget.token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getJurnal',
-            'payment_id': widget.paymentID,
-          }));
+      final res = await PettyCashService.getJournalDetail(
+        paymentId: widget.paymentID,
+      );
 
       if (!mounted) return;
       setState(() {
-        _detil = List<Map<String, dynamic>>.from(res.data['detil'] ?? []);
-        _images = List<String>.from(res.data['images'] ?? []);
-        _totalDebit = double.tryParse('${res.data['total_debit'] ?? 0}') ?? 0;
-        _totalKredit = double.tryParse('${res.data['total_kredit'] ?? 0}') ?? 0;
+        _detil = List<Map<String, dynamic>>.from(res['detil'] ?? []);
+        _images = List<String>.from(res['images'] ?? []);
+        _totalDebit = (res['total_debit'] as num?)?.toDouble() ?? 0.0;
+        _totalKredit = (res['total_kredit'] as num?)?.toDouble() ?? 0.0;
       });
     } catch (_) {
       // biarkan list kosong, tampilkan pesan default di UI

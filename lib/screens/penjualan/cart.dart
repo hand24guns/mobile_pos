@@ -7,23 +7,17 @@ extension PenjualanCartX on _PenjualanScreenState {
   Future<void> _removeItem(int index) async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
       final item = state.items[index];
 
-      await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'deleteItem',
-          'id': item.id,
-          'number': state.number,
-          'sku': item.kode,
-          'packages_notes': item.packagesNotes ?? '',
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-        }),
+      await CartService.deleteItem(
+        itemId: item.id,
+        number: state.number,
+        deviceToken: _deviceToken,
+        voucher: _activeVoucher,
+        memberId: state.memberID ?? 0,
+        organisasiId: state.organisasiID,
+        storeId: state.storeID,
+        salesTipeId: state.salesTipeID,
       );
 
       await _refreshFromApi();
@@ -37,32 +31,26 @@ extension PenjualanCartX on _PenjualanScreenState {
     }
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
       final item = state.items[index];
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'updateQty',
-          'id': item.id,
-          'number': state.number,
-          'sku': item.kode,
-          'qty': qty,
-          'packages_notes': item.packagesNotes ?? '',
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'salestipe_id': state.salesTipeID,
-        }),
+      final resMap = await CartService.updateQty(
+        itemId: item.id,
+        qty: qty.toDouble(),
+        number: state.number,
+        deviceToken: _deviceToken,
+        voucher: _activeVoucher,
+        memberId: state.memberID ?? 0,
+        organisasiId: state.organisasiID,
+        storeId: state.storeID,
+        salesTipeId: state.salesTipeID,
       );
 
-      if (res.data['success'] != true) {
+      if (resMap['success'] != true) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(res.data['message'] ?? 'Gagal mengubah qty'),
+              content:
+                  Text(resMap['message']?.toString() ?? 'Gagal mengubah qty'),
               backgroundColor: Colors.red,
             ),
           );
@@ -76,20 +64,11 @@ extension PenjualanCartX on _PenjualanScreenState {
 
   Future<void> _updateItemKeterangan(int index, String keterangan) async {
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
     final item = state.items[index];
 
-    await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'updateItemKeterangan',
-        'id': item.id,
-        'number': state.number,
-        'sku': item.kode,
-        'packages_notes': item.packagesNotes ?? '',
-        'keterangan': keterangan,
-        'device_token': _deviceToken,
-      }),
+    await CartService.updateItemNotes(
+      itemId: item.id,
+      keterangan: keterangan,
     );
 
     // Dispose controller lama agar re-init dengan teks terbaru setelah refresh
@@ -119,18 +98,14 @@ extension PenjualanCartX on _PenjualanScreenState {
 
           // Recalculate diskon dengan member baru
           await _runCartMutation(() async {
-            final dio = ApiService.getDio(token: _token);
-            await dio.post(
-              '/penjualan.php',
-              data: FormData.fromMap({
-                'action': 'recalculate',
-                'number': state.number,
-                'store_id': state.storeID,
-                'organisasi_id': state.organisasiID,
-                'member_id': memberID,
-                'voucher': _activeVoucher,
-                'device_token': _deviceToken,
-              }),
+            await CartService.recalculate(
+              number: state.number,
+              storeId: state.storeID,
+              organisasiId: state.organisasiID,
+              memberId: memberID,
+              voucher: _activeVoucher,
+              deviceToken: _deviceToken,
+              salesTipeId: state.salesTipeID,
             );
 
             await _refreshFromApi();
@@ -222,22 +197,16 @@ extension PenjualanCartX on _PenjualanScreenState {
   Future<void> _applyVoucher(String kode) async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'cekVoucher',
-          'number': state.number,
-          'voucher': kode,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'device_token': _deviceToken,
-        }),
+      final res = await CartService.checkVoucher(
+        code: kode,
+        number: state.number,
+        storeId: state.storeID,
+        organisasiId: state.organisasiID,
+        deviceToken: _deviceToken,
       );
 
-      if (res.data['success'] == true) {
+      if (res['success'] == true) {
         _setState(() => _activeVoucher = kode);
         await _refreshFromApi();
         if (mounted) {
@@ -252,7 +221,7 @@ extension PenjualanCartX on _PenjualanScreenState {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(res.data['message'] ?? 'Voucher tidak valid'),
+              content: Text(res['message']?.toString() ?? 'Voucher tidak valid'),
               backgroundColor: Colors.red,
             ),
           );
@@ -264,28 +233,20 @@ extension PenjualanCartX on _PenjualanScreenState {
   Future<void> _removeVoucher() async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
 
-      await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'resetDiskon',
-          'number': state.number,
-          'device_token': _deviceToken,
-        }),
+      await CartService.resetDiscount(
+        number: state.number,
+        deviceToken: _deviceToken,
       );
 
-      await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'recalculate',
-          'number': state.number,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'voucher': '',
-          'device_token': _deviceToken,
-        }),
+      await CartService.recalculate(
+        number: state.number,
+        storeId: state.storeID,
+        organisasiId: state.organisasiID,
+        memberId: state.memberID ?? 0,
+        voucher: '',
+        deviceToken: _deviceToken,
+        salesTipeId: state.salesTipeID,
       );
 
       _setState(() => _activeVoucher = '');
@@ -343,23 +304,16 @@ extension PenjualanCartX on _PenjualanScreenState {
   // bisa dipencet sebelum item retur selesai masuk ke cart.
   Future<void> _prosesRetur(String returNumber) async {
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
 
-    final cekRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'cekRetur',
-        'retur_number': returNumber,
-        'store_id': state.storeID,
-        'organisasi_id': state.organisasiID,
-      }),
+    final cekRes = await CartService.checkReturn(
+      nomorInvoice: returNumber,
     );
 
-    if (cekRes.data['success'] != true) {
+    if (cekRes['success'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(cekRes.data['message']),
+            content: Text(cekRes['message']?.toString() ?? 'Gagal cek retur'),
             backgroundColor: Colors.red,
           ),
         );
@@ -368,19 +322,16 @@ extension PenjualanCartX on _PenjualanScreenState {
     }
 
     await _runCartMutation(() async {
-      final loadRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'loadRetur',
-          'retur_number': returNumber,
-          'number': state.number,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'device_token': _deviceToken,
-        }),
+      final loadRes = await CartService.loadReturn(
+        nomorInvoice: returNumber,
+        number: state.number,
+        storeId: state.storeID,
+        organisasiId: state.organisasiID,
+        deviceToken: _deviceToken,
+        salesTipeId: state.salesTipeID,
       );
 
-      if (loadRes.data['success'] == true) {
+      if (loadRes['success'] == true) {
         ref.read(penjualanProvider.notifier).setReturSource(returNumber);
         await _refreshFromApi();
         if (mounted) {
@@ -394,8 +345,8 @@ extension PenjualanCartX on _PenjualanScreenState {
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Gagal load item retur'),
+            SnackBar(
+              content: Text(loadRes['message']?.toString() ?? 'Gagal load item retur'),
               backgroundColor: Colors.red,
             ),
           );
@@ -525,7 +476,8 @@ extension PenjualanCartX on _PenjualanScreenState {
                             reason: selectedReason!,
                           );
                         },
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  style:
+                      ElevatedButton.styleFrom(backgroundColor: Colors.green),
                   child: const Text(
                     'Jadikan Gratis',
                     style: TextStyle(color: Colors.white),
@@ -546,27 +498,22 @@ extension PenjualanCartX on _PenjualanScreenState {
   }) async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
       final item = state.items[index];
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'setItemFree',
-          'id': item.id,
-          'number': state.number,
-          'is_free': isFree ? 1 : 0,
-          'free_reason': reason,
-          'device_token': _deviceToken,
-        }),
+      final resMap = await CartService.setItemFree(
+        itemId: item.id,
+        number: state.number,
+        deviceToken: _deviceToken,
+        isFree: isFree,
       );
 
-      if (res.data['success'] == true) {
+      if (resMap['success'] == true) {
         await _refreshFromApi();
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(res.data['message'] ?? 'Gagal mengubah status gratis'),
+            content:
+                Text(resMap['message']?.toString() ?? 'Gagal mengubah status gratis'),
             backgroundColor: Colors.red,
           ),
         );
@@ -620,19 +567,10 @@ extension PenjualanCartX on _PenjualanScreenState {
 
             try {
               final state = ref.read(penjualanProvider);
-              final dio = ApiService.getDio(token: _token);
-              final res = await dio.post(
-                '/penjualan.php',
-                data: FormData.fromMap({
-                  'action': 'searchProduk',
-                  'term': term,
-                  'organisasi_id': state.organisasiID,
-                  'salestipe_id': state.salesTipeID,
-                }),
-              );
-
-              final data = List<Map<String, dynamic>>.from(
-                res.data['data'] ?? [],
+              final data = await ProductService.searchProducts(
+                term: term,
+                organisasiId: state.organisasiID,
+                salesTipeId: state.salesTipeID,
               );
 
               if (data.isEmpty) {
@@ -654,8 +592,7 @@ extension PenjualanCartX on _PenjualanScreenState {
                   selectedKode = p['kode']?.toString();
                   selectedNama = p['nama']?.toString();
                   selectedIsGiftEligible = isGiftEligible;
-                  searchController.text =
-                      '${p['nama']} (${p['kode']})';
+                  searchController.text = '${p['nama']} (${p['kode']})';
                   searchResults = [];
                   isSearching = false;
                   // Reset pilihan gift kalau produk yang baru terpilih
@@ -857,8 +794,7 @@ extension PenjualanCartX on _PenjualanScreenState {
                       title: Text(r),
                       value: r,
                       groupValue: giftReason,
-                      onChanged: (val) =>
-                          setSheetState(() => giftReason = val),
+                      onChanged: (val) => setSheetState(() => giftReason = val),
                     ),
                   ),
                 ],
@@ -907,32 +843,22 @@ extension PenjualanCartX on _PenjualanScreenState {
   }) async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'insertItemNewRow',
-          'number': state.number,
-          'sku': sku,
-          'qty': qty,
-          'is_free': isFree ? 1 : 0,
-          'free_reason': reason,
-          'store_id': state.storeID,
-          'organisasi_id': state.organisasiID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'salestipe_id': state.salesTipeID,
-        }),
+      final res = await CartService.insertItemNewRow(
+        number: state.number,
+        sku: sku,
+        organisasiId: state.organisasiID,
+        storeId: state.storeID,
+        deviceToken: _deviceToken,
+        salesTipeId: state.salesTipeID,
       );
 
-      if (res.data['success'] == true) {
+      if (res['success'] == true) {
         await _refreshFromApi();
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(res.data['message'] ?? 'Gagal menambah item'),
+            content: Text(res['message']?.toString() ?? 'Gagal menambah item'),
             backgroundColor: Colors.red,
           ),
         );
@@ -943,5 +869,4 @@ extension PenjualanCartX on _PenjualanScreenState {
   // ============================================================
   // PROSES BAYAR
   // ============================================================
-
 }

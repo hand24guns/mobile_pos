@@ -1,7 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import '../../services/api_service.dart';
+import '../../services/store_service.dart';
+import '../../services/report_service.dart';
 import '../../services/session_service.dart';
 
 // ─── Palette ────────────────────────────────────────────────
@@ -27,7 +26,6 @@ class OnhandReportScreen extends StatefulWidget {
 class _OnhandReportScreenState extends State<OnhandReportScreen> {
   List<Map<String, dynamic>> _stores = []; // [{id, nama}]
   int? _selectedStore;
-  bool _loadingStores = false;
   bool _loadingData = false;
   bool _hasLoadedOnce = false;
   List<dynamic> _rows = [];
@@ -71,40 +69,20 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
   // ============================================================
   Future<void> _loadStores() async {
     if (!mounted) return;
-    setState(() => _loadingStores = true);
     try {
       final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'getStores',
-          'user_id': (session['user_id'] ?? '').toString(),
-        },
-      ).timeout(const Duration(seconds: 10));
+      final userId = int.tryParse(session['user_id']?.toString() ?? '');
+      final stores = await StoreService.getStores(userId: userId);
 
       if (!mounted) return;
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
-        final raw = (data['stores'] ?? data['data'] ?? []) as List<dynamic>;
-        setState(() {
-          _stores = raw.map((e) {
-            final m = e as Map<String, dynamic>;
-            return {
-              'id': m['id'] ?? m['dim_divisi_id'] ?? m['store_id'],
-              'nama': m['nama'] ?? m['store_name'] ?? m['name'],
-            };
-          }).toList();
-        });
-      }
+      setState(() {
+        _stores = stores.map((m) => {
+          'id': m['id'] ?? m['dim_divisi_id'] ?? m['store_id'],
+          'nama': m['nama'] ?? m['store_name'] ?? m['name'],
+        }).toList();
+      });
     } catch (_) {
       // Gagal ambil nama store — dropdown fallback tampilkan ID saja.
-    } finally {
-      if (mounted) setState(() => _loadingStores = false);
     }
   }
 
@@ -120,31 +98,20 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
     });
 
     try {
-      final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'getOnhand',
-          'store_id': (_selectedStore ?? 0).toString(),
-        },
-      ).timeout(const Duration(seconds: 15));
+      final res = await ReportService.getOnhandReport(
+        storeId: _selectedStore,
+      );
 
       if (!mounted) return;
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
+      if (res.success) {
         setState(() {
-          _rows = data['items'] ?? [];
-          _summary = (data['summary'] ?? {}) as Map<String, dynamic>;
+          _rows = res.items;
+          _summary = res.summary;
           _hasLoadedOnce = true;
         });
       } else {
         setState(() {
-          _error = data['message'] ?? 'Gagal memuat data onhand';
+          _error = res.message ?? 'Gagal memuat data onhand';
         });
       }
     } catch (_) {

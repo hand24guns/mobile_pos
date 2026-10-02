@@ -59,26 +59,20 @@ extension PenjualanPendingX on _PenjualanScreenState {
     required int? pendingOrderID,
   }) async {
     final session = await SessionService.getSession();
-    final dio = ApiService.getDio(token: _token);
-
-    final res = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'simpanPending',
-        'number': state.number,
-        'store_id': state.storeID,
-        'organisasi_id': state.organisasiID,
-        'member_id': state.memberID ?? 0,
-        'user_id': session['user_id'],
-        'label': label ?? '',
-        'device_token': _deviceToken,
-        'salestipe_id': state.salesTipeID,
-        'keterangan': _keteranganController.text.trim(),
-        if (pendingOrderID != null) 'pending_order_id': pendingOrderID,
-      }),
+    final res = await PendingOrderService.savePending(
+      number: state.number,
+      storeId: state.storeID,
+      organisasiId: state.organisasiID,
+      memberId: state.memberID ?? 0,
+      userId: session['user_id'],
+      label: label ?? '',
+      deviceToken: _deviceToken,
+      salesTipeId: state.salesTipeID,
+      keterangan: _keteranganController.text.trim(),
+      pendingOrderId: pendingOrderID,
     );
 
-    if (res.data['success'] == true) {
+    if (res['success'] == true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -97,7 +91,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(res.data['message'] ?? 'Gagal simpan pending'),
+            content: Text(res['message'] ?? 'Gagal simpan pending'),
           ),
         );
       }
@@ -109,17 +103,10 @@ extension PenjualanPendingX on _PenjualanScreenState {
   // ============================================================
   Future<void> _showRetrieveDialog() async {
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
-
-    final res = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getPendingOrders',
-        'store_id': state.storeID,
-      }),
+    final orders = await PendingOrderService.getPendingOrders(
+      storeId: state.storeID,
     );
 
-    final orders = List<Map<String, dynamic>>.from(res.data['data']);
     if (orders.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -232,11 +219,14 @@ extension PenjualanPendingX on _PenjualanScreenState {
                                 ),
                               );
                               if (del == true) {
+                                if (mounted)
+                                  Navigator.pop(
+                                      context); // Tutup bottom sheet aktif
                                 await _deletePending(
-                                  int.parse(order['id'].toString()),
-                                );
-                                if (mounted) Navigator.pop(context);
-                                await _showRetrieveDialog();
+                                    int.parse(order['id'].toString()));
+                                if (mounted) {
+                                  _showRetrieveDialog(); // Panggil dialog segar dari konteks utama
+                                }
                               }
                             },
                           ),
@@ -255,24 +245,13 @@ extension PenjualanPendingX on _PenjualanScreenState {
 
   Future<void> _retrievePending(int salesOrderID, String member) async {
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
 
-    // FIX: sebelumnya request ini tidak dibungkus try/catch dan tidak ada
-    // cabang else untuk success:false — kalau backend gagal (exception,
-    // response bukan JSON valid, atau success:false dari validasi server)
-    // method ini diam total: tidak ada snackbar, tidak ada log ke kasir,
-    // tombol retrieve seolah tidak bereaksi ("stuck"). Sekarang setiap
-    // kegagalan selalu tampil ke kasir.
-    Response res;
+    Map<String, dynamic> res;
     try {
-      res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'retrievePending',
-          'sales_order_id': salesOrderID,
-          'number': state.number,
-          'device_token': _deviceToken,
-        }),
+      res = await PendingOrderService.retrievePending(
+        salesOrderId: salesOrderID,
+        number: state.number,
+        deviceToken: _deviceToken,
       );
     } catch (e) {
       if (mounted) {
@@ -283,11 +262,11 @@ extension PenjualanPendingX on _PenjualanScreenState {
       return;
     }
 
-    if (res.data['success'] == true) {
-      final restoredNumber = res.data['number'] as String? ?? state.number;
+    if (res['success'] == true) {
+      final restoredNumber = res['number'] as String? ?? state.number;
 
       // Resolve salestipe dulu sebelum setInitialData
-      final salestipeID = res.data['salestipe_id'];
+      final salestipeID = res['salestipe_id'];
       final resolvedSalesTipeID =
           (salestipeID != null && int.parse(salestipeID.toString()) > 0)
               ? int.parse(salestipeID.toString())
@@ -304,9 +283,9 @@ extension PenjualanPendingX on _PenjualanScreenState {
           );
 
       // Set member
-      final memberID = res.data['member_id'];
+      final memberID = res['member_id'];
       if (memberID != null && int.parse(memberID.toString()) > 0) {
-        _memberController.text = res.data['member'] ?? '';
+        _memberController.text = res['member'] ?? '';
         ref
             .read(penjualanProvider.notifier)
             .setMember(int.parse(memberID.toString()), member);
@@ -316,7 +295,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
       }
 
       // Restore keterangan
-      final keterangan = res.data['keterangan'] as String? ?? '';
+      final keterangan = res['keterangan'] as String? ?? '';
       _keteranganController.text = keterangan;
 
       // Reload grid image jika salestipe berubah
@@ -325,7 +304,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
       // Simpan ID pending order yang sedang aktif agar bisa di-update (bukan insert baru)
       _setState(() {
         _activePendingOrderID = salesOrderID;
-        _activePendingLabel = res.data['order_nama'] as String? ?? '';
+        _activePendingLabel = res['order_nama'] as String? ?? '';
       });
 
       // FIX: Load items langsung dari temp_invoice tanpa recalculate harga.
@@ -345,14 +324,11 @@ extension PenjualanPendingX on _PenjualanScreenState {
         );
       }
     } else {
-      // FIX: cabang ini sebelumnya tidak ada — success:false dari server
-      // (mis. FIX 3 di OrderHandler.php: item pending tidak ketemu, atau
-      // pesan error lain) dulu tidak ditampilkan sama sekali ke kasir.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              res.data['message']?.toString() ?? 'Gagal retrieve order',
+              res['message']?.toString() ?? 'Gagal retrieve order',
             ),
           ),
         );
@@ -365,24 +341,17 @@ extension PenjualanPendingX on _PenjualanScreenState {
   // Dipakai khusus setelah retrievePending agar harga salestipe
   // tidak ter-overwrite oleh _refreshFromApi().
   //
-  // PHP action 'getCartItemsAsIs' SELECT langsung dari temp_invoice
-  // tanpa JOIN ke dim_produk — hpj yang tersimpan dipakai as-is.
+  // REST API: GET /v1/cart/items-as-is
+  // Fallback: POST /penjualan.php (action: getCartItemsAsIs)
   // ============================================================
   Future<void> _loadItemsFromTemp(String number) async {
-    final dio = ApiService.getDio(token: _token);
-
-    final res = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getCartItemsAsIs',
-        'number': number,
-        'device_token': _deviceToken,
-      }),
+    final rawItems = await CartService.getCartItemsAsIs(
+      number: number,
+      deviceToken: _deviceToken,
     );
 
-    if (res.data['success'] != true) return;
+    if (rawItems.isEmpty) return;
 
-    final rawItems = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
     final items = rawItems.map((j) => CartItem.fromJson(j)).toList();
 
     // updateItems() menghitung ulang gross/diskon/total dari item.subtotal
@@ -394,14 +363,9 @@ extension PenjualanPendingX on _PenjualanScreenState {
   // histori order & detail tetap ada untuk audit).
   Future<void> _deletePending(int salesOrderID) async {
     final session = await SessionService.getSession();
-    final dio = ApiService.getDio(token: _token);
-    await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'deletePending',
-        'sales_order_id': salesOrderID,
-        'user_id': session['user_id'],
-      }),
+    await PendingOrderService.deletePending(
+      salesOrderId: salesOrderID,
+      userId: session['user_id'],
     );
   }
 
@@ -525,17 +489,12 @@ extension PenjualanPendingX on _PenjualanScreenState {
 
     final salesOrderID = int.parse(order['id'].toString());
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
 
-    final itemsRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getPendingOrderItems',
-        'sales_order_id': salesOrderID,
-      }),
+    final itemsRes = await PendingOrderService.getPendingOrderItems(
+      salesOrderId: salesOrderID,
     );
 
-    if (itemsRes.data['success'] != true) {
+    if (itemsRes['success'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -547,32 +506,26 @@ extension PenjualanPendingX on _PenjualanScreenState {
       return null;
     }
 
-    final storeRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getStoreData',
-        'store_id': state.storeID,
-      }),
-    );
+    final storeRes = await StoreService.getStoreData(state.storeID);
 
     // Gunakan salestipe_nama & keterangan dari header order (bukan dari state aktif)
-    final salesTipeNama = (itemsRes.data['salestipe_nama'] as String? ?? '')
+    final salesTipeNama = (itemsRes['salestipe_nama'] as String? ?? '')
             .isNotEmpty
-        ? itemsRes.data['salestipe_nama'] as String
+        ? itemsRes['salestipe_nama'] as String
         : (_channels.isNotEmpty
             ? (_channels
                     .firstWhere(
                       (c) =>
                           int.parse(c['dim_salestipe_id'].toString()) ==
-                          (itemsRes.data['salestipe_id'] as num? ?? 0).toInt(),
+                          (itemsRes['salestipe_id'] as num? ?? 0).toInt(),
                       orElse: () => {'nama': ''},
                     )['nama']
                     ?.toString() ??
                 '')
             : '');
-    final keteranganOrder = itemsRes.data['keterangan_order'] as String? ?? '';
+    final keteranganOrder = itemsRes['keterangan_order'] as String? ?? '';
     // Tanggal dari tr_sales_order.tanggal (date saat order dibuat)
-    final tanggalRaw = itemsRes.data['tanggal']?.toString() ?? '';
+    final tanggalRaw = itemsRes['tanggal']?.toString() ?? '';
     final tanggal = tanggalRaw.isNotEmpty
         ? tanggalRaw.substring(
             0,
@@ -580,7 +533,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
           )
         : DateTime.now().toString().substring(0, 10); // fallback
     // Jam transaksi dari created_date order pending (format: "2024-01-15 14:30:00" → "14:30")
-    final createdDateRaw = itemsRes.data['created_date']?.toString() ?? '';
+    final createdDateRaw = itemsRes['created_date']?.toString() ?? '';
     final jamTransaksiPending = createdDateRaw.length >= 16
         ? createdDateRaw.substring(11, 16)
         : (createdDateRaw.length >= 13 ? createdDateRaw.substring(11) : '');
@@ -594,7 +547,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
     // Backend getPendingOrderItems hanya balikin 'total' (sum netto per item),
     // bukan gross/diskon per order — jadi dihitung di sini dari tiap item:
     // gross = qty x hpj (sebelum diskon), diskon = gross - subtotal (netto).
-    final pendingItems = List<Map<String, dynamic>>.from(itemsRes.data['data']);
+    final pendingItems = List<Map<String, dynamic>>.from(itemsRes['data'] ?? []);
     double computedGross = 0;
     double computedDiskon = 0;
     for (final item in pendingItems) {
@@ -608,15 +561,15 @@ extension PenjualanPendingX on _PenjualanScreenState {
 
     return {
       'items': pendingItems,
-      'total': (itemsRes.data['total'] as num? ?? 0).toDouble(),
+      'total': (itemsRes['total'] as num? ?? 0).toDouble(),
       'gross': computedGross,
       'diskon': computedDiskon,
-      'storeName': storeRes.data['nama'] ?? '',
-      'storeAddress': storeRes.data['alamat'] ?? '',
-      'storeNpwp': storeRes.data['npwp'] ?? '',
-      'invoiceNote': storeRes.data['invoice_note'] ?? '',
-      'logoFileName': storeRes.data['logo_file_name'] ?? '',
-      'logoUrl': storeRes.data['logo_url'] ?? '',
+      'storeName': storeRes['nama'] ?? '',
+      'storeAddress': storeRes['alamat'] ?? '',
+      'storeNpwp': storeRes['npwp'] ?? '',
+      'invoiceNote': storeRes['invoice_note'] ?? '',
+      'logoFileName': storeRes['logo_file_name'] ?? '',
+      'logoUrl': storeRes['logo_url'] ?? '',
       'salesTipeNama': salesTipeNama,
       'kasirNama': kasirNama,
       'tanggal': tanggal,

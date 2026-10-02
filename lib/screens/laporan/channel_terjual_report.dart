@@ -1,8 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import '../../services/api_service.dart';
+import '../../services/report_service.dart';
 import '../../services/session_service.dart';
+import '../../services/store_service.dart';
 import '../invoice_list_screen.dart';
 
 // ─── Palette ────────────────────────────────────────────────
@@ -39,7 +38,6 @@ class _ChannelTerjualReportScreenState
     extends State<ChannelTerjualReportScreen> {
   List<Map<String, dynamic>> _stores = []; // [{id, nama}]
   int? _selectedStore;
-  bool _loadingStores = false;
   bool _loadingData = false;
   bool _hasLoadedOnce = false;
   List<dynamic> _rows = [];
@@ -83,40 +81,16 @@ class _ChannelTerjualReportScreenState
   // ============================================================
   Future<void> _loadStores() async {
     if (!mounted) return;
-    setState(() => _loadingStores = true);
     try {
       final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'getStores',
-          'user_id': (session['user_id'] ?? '').toString(),
-        },
-      ).timeout(const Duration(seconds: 10));
-
+      final userId = int.tryParse(session['user_id']?.toString() ?? '');
+      final stores = await StoreService.getStores(userId: userId);
       if (!mounted) return;
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
-        final raw = (data['stores'] ?? data['data'] ?? []) as List<dynamic>;
-        setState(() {
-          _stores = raw.map((e) {
-            final m = e as Map<String, dynamic>;
-            return {
-              'id': m['id'] ?? m['dim_divisi_id'] ?? m['store_id'],
-              'nama': m['nama'] ?? m['store_name'] ?? m['name'],
-            };
-          }).toList();
-        });
-      }
+      setState(() {
+        _stores = stores;
+      });
     } catch (_) {
       // Gagal ambil nama store — dropdown fallback tampilkan ID saja.
-    } finally {
-      if (mounted) setState(() => _loadingStores = false);
     }
   }
 
@@ -129,33 +103,22 @@ class _ChannelTerjualReportScreenState
     });
 
     try {
-      final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'getChannelTerjual',
-          'store_id': _selectedStore.toString(),
-          'start_date': _formatDate(_startDate),
-          'end_date': _formatDate(_endDate),
-        },
-      ).timeout(const Duration(seconds: 15));
+      final result = await ReportService.getChannelTerjualReport(
+        storeId: _selectedStore,
+        startDate: _formatDate(_startDate),
+        endDate: _formatDate(_endDate),
+      );
 
       if (!mounted) return;
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
+      if (result.success) {
         setState(() {
-          _rows = data['items'] ?? [];
-          _summary = (data['summary'] ?? {}) as Map<String, dynamic>;
+          _rows = result.items;
+          _summary = result.summary;
           _hasLoadedOnce = true;
         });
       } else {
         setState(() {
-          _error = data['message'] ?? 'Gagal memuat data channel terjual';
+          _error = result.message ?? 'Gagal memuat data channel terjual';
         });
       }
     } catch (_) {

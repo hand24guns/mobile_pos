@@ -20,17 +20,12 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
     if (state.items.isNotEmpty) {
       await _runCartMutation(() async {
         try {
-          final dio = ApiService.getDio(token: _token);
-          await dio.post(
-            '/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'recalculateChannel',
-              'number': state.number,
-              'salestipe_id': val,
-              'store_id': state.storeID,
-              'organisasi_id': state.organisasiID,
-              'device_token': _deviceToken,
-            }),
+          await CartService.recalculateChannel(
+            number: state.number,
+            salesTipeId: val,
+            storeId: state.storeID,
+            organisasiId: state.organisasiID,
+            deviceToken: _deviceToken,
           );
           await _refreshFromApi();
         } catch (_) {
@@ -161,17 +156,9 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                   ),
                   onSubmitted: (val) async {
                     if (val.isEmpty) return;
-                    final dio = ApiService.getDio(token: _token);
-                    final res = await dio.post(
-                      '/penjualan.php',
-                      data: FormData.fromMap({
-                        'action': 'searchMember',
-                        'term': val,
-                        'organisasi_id': state.organisasiID,
-                      }),
-                    );
-                    final data = List<Map<String, dynamic>>.from(
-                      res.data['data'],
+                    final data = await PosDataService.searchMember(
+                      keyword: val,
+                      organisasiId: state.organisasiID,
                     );
                     if (data.isEmpty) {
                       if (mounted) {
@@ -461,17 +448,9 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                   ),
                   onSubmitted: (val) async {
                     if (val.isEmpty) return;
-                    final dio = ApiService.getDio(token: _token);
-                    final res = await dio.post(
-                      '/penjualan.php',
-                      data: FormData.fromMap({
-                        'action': 'searchMember',
-                        'term': val,
-                        'organisasi_id': state.organisasiID,
-                      }),
-                    );
-                    final data = List<Map<String, dynamic>>.from(
-                      res.data['data'],
+                    final data = await PosDataService.searchMember(
+                      keyword: val,
+                      organisasiId: state.organisasiID,
                     );
                     if (data.isEmpty) {
                       if (mounted) {

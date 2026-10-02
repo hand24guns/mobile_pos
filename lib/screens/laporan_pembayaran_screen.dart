@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import '../services/session_service.dart';
-import '../services/api_service.dart';
+import '../services/store_service.dart';
+import '../services/report_service.dart';
 import 'invoice_list_screen.dart';
 
 // ─── Palette (sama dengan home_screen) ──────────────────────
@@ -11,7 +10,6 @@ const Color _navy = Color(0xFF0D1B3E);
 const Color _navyMid = Color(0xFF1A2F5A);
 const Color _navyLight = Color(0xFF243B6E);
 const Color _blue = Color(0xFF2563EB);
-const Color _green = Color(0xFF22C55E);
 const Color _bgGray = Color(0xFFF0F4FA);
 
 class LaporanPembayaranScreen extends ConsumerStatefulWidget {
@@ -27,12 +25,13 @@ class _LaporanPembayaranScreenState
   bool _isLoading = false;
   List<int> _outlets = [];
 
-  // Filter outlet — 1 store dipilih sekaligus, sama seperti pola di
-  // menu Laporan (OnhandReportScreen/ItemTerjualReportScreen/dst).
+  // Filter outlet:
+  // null = Semua Outlet (jika multi store)
+  // int = Outlet tertentu yang dipilih
   List<Map<String, dynamic>> _stores = []; // [{id, nama}]
-  int? _selectedStore;
+  int? _selectedStoreId;
 
-  bool get _singleStore => _outlets.length <= 1;
+  bool get _isMultiStore => _stores.length > 1;
 
   // Filter state
   DateTime _startDate = DateTime.now();
@@ -46,147 +45,185 @@ class _LaporanPembayaranScreenState
   @override
   void initState() {
     super.initState();
-    _loadSession();
+    _loadInitialData();
   }
 
-  Future<void> _loadSession() async {
-    final session = await SessionService.getSession();
-    if (!mounted) return;
-    setState(() {
-      _outlets = List<int>.from(session['outlets'] ?? []);
-      _selectedStore = _outlets.isNotEmpty ? _outlets.first : null;
-    });
-    await _loadStores();
-    _fetchData();
+  Future<void> _loadInitialData() async {
+    setState(() => _isLoading = true);
+    await _loadStoresAndPermissions();
+    await _fetchData();
   }
 
-  Future<void> _loadStores() async {
+  Future<void> _loadStoresAndPermissions() async {
     try {
       final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'getStores',
-          'user_id': (session['user_id'] ?? '').toString(),
-        },
-      ).timeout(const Duration(seconds: 10));
+      final sessionOutlets = List<int>.from(session['outlets'] ?? []);
+      final userId = session['user_id'] is int
+          ? session['user_id'] as int
+          : int.tryParse(session['user_id']?.toString() ?? '');
+
+      final rawStores = await StoreService.getStores(userId: userId);
+
+      // Filter store berdasarkan hak akses user di session:
+      // Hanya sertakan store yang ada di session['outlets'] (bila sessionOutlets terisi)
+      final List<Map<String, dynamic>> accessible = [];
+      for (final m in rawStores) {
+        final id = int.tryParse(
+                (m['id'] ?? m['dim_divisi_id'] ?? m['store_id'] ?? '')
+                    .toString()) ??
+            0;
+        if (id <= 0) continue;
+        if (sessionOutlets.isNotEmpty && !sessionOutlets.contains(id)) {
+          continue;
+        }
+        final nama =
+            (m['nama'] ?? m['store_name'] ?? m['name'] ?? 'Store $id')
+                .toString();
+        accessible.add(<String, dynamic>{'id': id, 'nama': nama});
+      }
 
       if (!mounted) return;
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
-        final raw = (data['stores'] ?? data['data'] ?? []) as List<dynamic>;
-        setState(() {
-          _stores = raw.map((e) {
-            final m = e as Map<String, dynamic>;
-            return {
-              'id': m['id'] ?? m['dim_divisi_id'] ?? m['store_id'],
-              'nama': m['nama'] ?? m['store_name'] ?? m['name'],
-            };
-          }).toList();
-        });
-      }
+
+      setState(() {
+        _stores = accessible;
+        _outlets = accessible.map((s) => s['id'] as int).toList();
+
+        // Alur Relasi Hak Akses:
+        // - Single store (1 outlet): Otomatis pilih store tersebut.
+        // - Multi store (>1 outlet): Default awalnya adalah SEMUA STORE (null).
+        if (_stores.length == 1) {
+          _selectedStoreId = _stores.first['id'] as int;
+        } else {
+          _selectedStoreId = null; // Semua Outlet
+        }
+      });
     } catch (_) {
-      // Gagal ambil nama store — chip fallback tampilkan ID saja.
+      // Gagal ambil nama store
     }
   }
 
-  String _storeName(int id) {
-    final match = _stores.firstWhere(
-      (s) => s['id'].toString() == id.toString(),
-      orElse: () => {},
-    );
-    return (match['nama'] as String?) ?? 'Store $id';
+  String get _selectedStoreLabel {
+    if (_selectedStoreId == null) {
+      return 'Semua Outlet';
+    }
+    for (final s in _stores) {
+      if (s['id'] == _selectedStoreId) {
+        return (s['nama'] as String?) ?? 'Store $_selectedStoreId';
+      }
+    }
+    return 'Store $_selectedStoreId';
   }
 
   Future<void> _pickStore() async {
+    if (!_isMultiStore) return;
+
     final picked = await showDialog<int?>(
       context: context,
       builder: (ctx) => SimpleDialog(
         title: const Text('Pilih Outlet',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-        children: _stores.map((s) {
-          final id = s['id'] as int;
-          final nama = s['nama'] as String;
-          final selected = _selectedStore == id;
-          return SimpleDialogOption(
-            onPressed: () => Navigator.pop(ctx, id),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        children: [
+          // 1. Opsi Default: Semua Outlet
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, -1), // -1 mewakili Semua Outlet
             child: Row(
               children: [
-                Icon(Icons.storefront_outlined,
-                    size: 18, color: selected ? _blue : Colors.grey),
+                Icon(
+                  Icons.store_mall_directory_rounded,
+                  size: 20,
+                  color: _selectedStoreId == null ? _blue : Colors.grey,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(nama,
-                      style: TextStyle(
-                          fontWeight:
-                              selected ? FontWeight.bold : FontWeight.normal,
-                          color: selected ? _blue : null)),
+                  child: Text(
+                    'Semua Outlet (${_stores.length})',
+                    style: TextStyle(
+                      fontWeight: _selectedStoreId == null
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: _selectedStoreId == null ? _blue : null,
+                    ),
+                  ),
                 ),
-                if (selected)
-                  const Icon(Icons.check, size: 16, color: _blue),
+                if (_selectedStoreId == null)
+                  const Icon(Icons.check, size: 18, color: _blue),
               ],
             ),
-          );
-        }).toList(),
+          ),
+          const Divider(height: 1),
+          // 2. Daftar masing-masing store yang diizinkan untuk user
+          ..._stores.map((s) {
+            final id = s['id'] as int;
+            final nama = (s['nama'] ?? 'Store $id').toString();
+            final selected = _selectedStoreId == id;
+            return SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, id),
+              child: Row(
+                children: [
+                  Icon(Icons.storefront_outlined,
+                      size: 18, color: selected ? _blue : Colors.grey),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(nama,
+                        style: TextStyle(
+                            fontWeight:
+                                selected ? FontWeight.bold : FontWeight.normal,
+                            color: selected ? _blue : null)),
+                  ),
+                  if (selected)
+                    const Icon(Icons.check, size: 16, color: _blue),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
 
-    if (picked == null || picked == _selectedStore) return;
-    setState(() => _selectedStore = picked);
+    if (picked == null) return;
+    final targetId = picked == -1 ? null : picked;
+    if (targetId == _selectedStoreId) return;
+
+    setState(() => _selectedStoreId = targetId);
     _fetchData();
   }
 
   Future<void> _fetchData() async {
-    if (_selectedStore == null) return;
+    // Tentukan store_ids yang akan dikirim:
+    // Jika dipilih store tertentu (_selectedStoreId != null) -> kirim store ID tersebut
+    // Jika Semua Outlet (_selectedStoreId == null) -> kirim seluruh store IDs yang dapat diakses user
+    String storeIdsParam = '';
+    if (_selectedStoreId != null) {
+      storeIdsParam = _selectedStoreId.toString();
+    } else {
+      if (_stores.isNotEmpty) {
+        storeIdsParam = _stores.map((s) => s['id'].toString()).join(',');
+      } else if (_outlets.isNotEmpty) {
+        storeIdsParam = _outlets.join(',');
+      }
+    }
+
+    if (storeIdsParam.isEmpty) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      final session = await SessionService.getSession();
-      final token = session['token'] ?? '';
-
-      final response = await http.post(
-        Uri.parse('${ApiService.baseUrl}/penjualan.php'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: {
-          'action': 'getLaporanPembayaran',
-          'store_ids': _selectedStore.toString(),
-          'start_date': _fmtDate(_startDate),
-          'end_date': _fmtDate(_endDate),
-        },
-      ).timeout(const Duration(seconds: 15));
+      final result = await ReportService.getPaymentReport(
+        storeIds: storeIdsParam,
+        startDate: _fmtDate(_startDate),
+        endDate: _fmtDate(_endDate),
+      );
 
       if (!mounted) return;
 
-      final data = jsonDecode(response.body);
-      if (data['success'] == true) {
-        final List rows = data['rows'] ?? [];
-        int freq = 0;
-        double amt = 0;
-        for (final r in rows) {
-          freq += _parseNum(r['jumlah']).toInt();
-          amt += _parseNum(r['total']);
-        }
-        final sorted = List<Map<String, dynamic>>.from(rows)
-          ..sort(
-              (a, b) => _parseNum(b['total']).compareTo(_parseNum(a['total'])));
-        setState(() {
-          _rows = sorted;
-          _totalFreq = freq;
-          _totalAmount = amt;
-        });
-      } else {
-        _rows = [];
-        _totalFreq = 0;
-        _totalAmount = 0;
-      }
+      setState(() {
+        _rows = result.rows;
+        _totalFreq = result.totalFrequency;
+        _totalAmount = result.totalAmount;
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -271,6 +308,9 @@ class _LaporanPembayaranScreenState
           initialCaraBayarName: caraBayar,
           initialDateFrom: _startDate,
           initialDateTo: _endDate,
+          initialStoreId: _selectedStoreId,
+          initialStoreName:
+              _selectedStoreId != null ? _selectedStoreLabel : null,
         ),
       ),
     );
@@ -376,9 +416,9 @@ class _LaporanPembayaranScreenState
           const Icon(Icons.storefront_rounded, size: 16, color: _blue),
           const SizedBox(width: 6),
           Expanded(
-            child: _singleStore
+            child: !_isMultiStore
                 ? Text(
-                    _outlets.isNotEmpty ? _storeName(_outlets.first) : '-',
+                    _selectedStoreLabel,
                     style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -386,9 +426,7 @@ class _LaporanPembayaranScreenState
                     overflow: TextOverflow.ellipsis,
                   )
                 : _StoreChip(
-                    label: _selectedStore != null
-                        ? _storeName(_selectedStore!)
-                        : 'Pilih Outlet',
+                    label: _selectedStoreLabel,
                     onTap: _pickStore,
                   ),
           ),

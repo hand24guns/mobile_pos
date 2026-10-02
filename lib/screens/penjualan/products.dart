@@ -29,19 +29,13 @@ extension PenjualanProductsX on _PenjualanScreenState {
   Future<void> _searchProduk(String sku) async {
     if (sku.isEmpty) return;
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
 
-    final res = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'searchProduk',
-        'term': sku,
-        'organisasi_id': state.organisasiID,
-        'salestipe_id': state.salesTipeID,
-      }),
+    final data = await ProductService.searchProducts(
+      term: sku,
+      organisasiId: state.organisasiID,
+      salesTipeId: state.salesTipeID,
     );
 
-    final data = List<Map<String, dynamic>>.from(res.data['data']);
     if (data.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -61,17 +55,8 @@ extension PenjualanProductsX on _PenjualanScreenState {
 
   // ============================================================
   // INSERT PRODUK — wrap: cek package dulu
-  // Pakai ResponseType.plain agar tidak crash jika PHP ada output
-  // warning/notice sebelum JSON — bersihkan string lalu parse.
   // ============================================================
   Future<void> _insertProduk(String sku) async {
-    // ── Guard: masih ada operasi cart lain berjalan (ganti channel,
-    // insert produk lain, update qty, voucher, dsb). Kalau dibiarkan,
-    // dialog package tetap bisa kebuka & tampil harga yang benar, tapi
-    // begitu "Tambah ke Order" ditekan, _doInsertPackage/_runCartMutation
-    // akan diam-diam no-op karena _isCartSyncing masih true — dialog
-    // sudah kepencet Batal, kasir mengira sudah masuk padahal tidak.
-    // Makanya block dari sini, sebelum cekPackage / dialog dibuka sama sekali.
     if (_isCartSyncing) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -84,51 +69,16 @@ extension PenjualanProductsX on _PenjualanScreenState {
       }
       return;
     }
-    // ── Guard: abaikan tap jika kode ini sedang diproses ──
     if (_processingKodes.contains(sku)) return;
     if (mounted) _setState(() => _processingKodes.add(sku));
 
     try {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
-
-      Map<String, dynamic> cekData;
-      try {
-        final rawRes = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'cekPackage',
-            'sku': sku,
-            'organisasi_id': state.organisasiID,
-            'salestipe_id': state.salesTipeID,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-
-        final rawStr = rawRes.data?.toString() ?? '';
-        final jsonStart = rawStr.indexOf('{');
-        if (jsonStart < 0) {
-          debugPrint('[cekPackage] Response tidak valid (no JSON): $rawStr');
-          await _doInsertProduk(sku);
-          return;
-        }
-        final cleanStr = rawStr.substring(jsonStart);
-        final decoded = jsonDecode(cleanStr);
-        if (decoded is! Map) {
-          debugPrint('[cekPackage] JSON bukan Map: $cleanStr');
-          await _doInsertProduk(sku);
-          return;
-        }
-        cekData = Map<String, dynamic>.from(decoded);
-      } on DioException catch (e) {
-        debugPrint('[cekPackage] DioException: ${e.message}');
-        await _doInsertProduk(sku);
-        return;
-      } catch (e) {
-        debugPrint('[cekPackage] Exception: $e');
-        await _doInsertProduk(sku);
-        return;
-      }
+      final cekData = await ProductService.checkPackage(
+        sku: sku,
+        organisasiId: state.organisasiID,
+        salesTipeId: state.salesTipeID,
+      );
 
       final isPackage =
           cekData['is_package'] == true || cekData['is_package'] == 1;
@@ -152,13 +102,10 @@ extension PenjualanProductsX on _PenjualanScreenState {
             },
           ),
         );
-        // Untuk package: lock dilepas setelah dialog muncul,
-        // bukan setelah insert — karena insert terjadi dari callback dialog.
       } else {
         await _doInsertProduk(sku);
       }
     } finally {
-      // Lock selalu dilepas, apapun yang terjadi
       if (mounted) _setState(() => _processingKodes.remove(sku));
     }
   }
@@ -167,32 +114,27 @@ extension PenjualanProductsX on _PenjualanScreenState {
   Future<void> _doInsertProduk(String sku) async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'insertItem',
-          'number': state.number,
-          'sku': sku,
-          'organisasi_id': state.organisasiID,
-          'store_id': state.storeID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'salestipe_id': state.salesTipeID,
-        }),
+      final res = await CartService.addItem(
+        number: state.number,
+        sku: sku,
+        organisasiId: state.organisasiID,
+        storeId: state.storeID,
+        memberId: state.memberID ?? 0,
+        voucher: _activeVoucher,
+        deviceToken: _deviceToken,
+        salesTipeId: state.salesTipeID,
       );
 
-      if (res.data['success'] == true) {
-        _checkVoucherValid(res.data);
+      if (res['success'] == true) {
+        _checkVoucherValid(res);
         await _refreshFromApi();
         _focusSku();
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(res.data['message'] ?? 'Gagal menambahkan produk'),
+              content: Text(res['message'] ?? 'Gagal menambahkan produk'),
               backgroundColor: Colors.red,
             ),
           );
@@ -212,29 +154,24 @@ extension PenjualanProductsX on _PenjualanScreenState {
   }) async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'insertPackage',
-          'number': state.number,
-          'sku': sku,
-          'organisasi_id': state.organisasiID,
-          'store_id': state.storeID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'isian': jsonEncode(isianDipilih),
-          'addon': jsonEncode(addonDipilih),
-          'addon_harga': addonTotal,
-          'keterangan': keterangan,
-          'salestipe_id': state.salesTipeID,
-        }),
+      final res = await CartService.addPackage(
+        number: state.number,
+        sku: sku,
+        organisasiId: state.organisasiID,
+        storeId: state.storeID,
+        memberId: state.memberID ?? 0,
+        voucher: _activeVoucher,
+        deviceToken: _deviceToken,
+        isianDipilih: isianDipilih,
+        addonDipilih: addonDipilih,
+        addonTotal: addonTotal,
+        keterangan: keterangan,
+        salesTipeId: state.salesTipeID,
       );
 
-      if (res.data['success'] == true) {
-        _checkVoucherValid(res.data);
+      if (res['success'] == true) {
+        _checkVoucherValid(res);
         await _refreshFromApi();
         _focusSku();
       } else {
@@ -242,7 +179,7 @@ extension PenjualanProductsX on _PenjualanScreenState {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                res.data['message'] ?? 'Gagal menambahkan produk package',
+                res['message'] ?? 'Gagal menambahkan produk package',
               ),
               backgroundColor: Colors.red,
             ),
@@ -277,25 +214,14 @@ extension PenjualanProductsX on _PenjualanScreenState {
     final item = state.items[index];
     if (!item.isPackage) return; // guard tambahan, tombol harusnya tak muncul
 
-    final dio = ApiService.getDio(token: _token);
-
-    Map<String, dynamic> cekData;
+    Map<String, dynamic> cekData = {};
     try {
-      final rawRes = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'cekPackage',
-          'sku': item.kode,
-          'organisasi_id': state.organisasiID,
-          'salestipe_id': state.salesTipeID,
-        }),
-        options: Options(responseType: ResponseType.plain),
+      cekData = await ProductService.checkPackage(
+        sku: item.kode,
+        organisasiId: state.organisasiID,
+        salesTipeId: state.salesTipeID,
       );
-      final rawStr = rawRes.data?.toString() ?? '';
-      final jsonStart = rawStr.indexOf('{');
-      if (jsonStart < 0) throw Exception('Response cekPackage tidak valid');
-      cekData =
-          Map<String, dynamic>.from(jsonDecode(rawStr.substring(jsonStart)));
+      if (cekData.isEmpty) throw Exception('Response cekPackage tidak valid');
     } catch (e) {
       debugPrint('[_editPackageItem] gagal ambil data package: $e');
       if (mounted) {
@@ -324,26 +250,25 @@ extension PenjualanProductsX on _PenjualanScreenState {
 
     // Parse pilihan sebelumnya dari packages_notes tersimpan.
     // Format: {"isian":[{"id":..,"nama":..}], "addon":[{"id":..,"nama":..,"harga":..}]}
-    // NOTE: cart lama (sebelum backend disimpan id-nya) mungkin cuma
-    // punya 'nama' tanpa 'id' — untuk kasus itu id dianggap 0 dan
-    // prefill jatuh ke "tidak tercentang" (aman, cuma kurang akurat
-    // khusus untuk item lama yang sudah ada sebelum update ini).
     Set<int> selectedIsianIds = {};
     Set<int> selectedAddonIds = {};
     final prevKeterangan = item.keterangan ?? '';
-    try {
-      final oldNotes =
-          jsonDecode(item.packagesNotes!) as Map<String, dynamic>;
-      selectedIsianIds = ((oldNotes['isian'] as List?) ?? [])
-          .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
-          .where((id) => id != 0)
-          .toSet();
-      selectedAddonIds = ((oldNotes['addon'] as List?) ?? [])
-          .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
-          .where((id) => id != 0)
-          .toSet();
-    } catch (e) {
-      debugPrint('[_editPackageItem] gagal parse packages_notes lama: $e');
+    if (item.packagesNotes != null && item.packagesNotes!.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(item.packagesNotes!);
+        if (decoded is Map<String, dynamic>) {
+          selectedIsianIds = ((decoded['isian'] as List?) ?? [])
+              .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
+              .where((id) => id != 0)
+              .toSet();
+          selectedAddonIds = ((decoded['addon'] as List?) ?? [])
+              .map((e) => (e is Map ? (e['id'] as num?)?.toInt() ?? 0 : 0))
+              .where((id) => id != 0)
+              .toSet();
+        }
+      } catch (e) {
+        debugPrint('[_editPackageItem] gagal parse packages_notes: $e');
+      }
     }
 
     if (!mounted) return;
@@ -381,30 +306,25 @@ extension PenjualanProductsX on _PenjualanScreenState {
   }) async {
     await _runCartMutation(() async {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
 
-      final res = await dio.post(
-        '/penjualan.php',
-        data: FormData.fromMap({
-          'action': 'editPackage',
-          'number': state.number,
-          'sku': sku,
-          'old_packages_notes': oldPackagesNotes,
-          'organisasi_id': state.organisasiID,
-          'store_id': state.storeID,
-          'member_id': state.memberID ?? 0,
-          'voucher': _activeVoucher,
-          'device_token': _deviceToken,
-          'isian': jsonEncode(isianDipilih),
-          'addon': jsonEncode(addonDipilih),
-          'addon_harga': addonTotal,
-          'keterangan': keterangan,
-          'salestipe_id': state.salesTipeID,
-        }),
+      final res = await CartService.editPackage(
+        number: state.number,
+        sku: sku,
+        oldPackagesNotes: oldPackagesNotes,
+        organisasiId: state.organisasiID,
+        storeId: state.storeID,
+        memberId: state.memberID ?? 0,
+        voucher: _activeVoucher,
+        deviceToken: _deviceToken,
+        isianDipilih: isianDipilih,
+        addonDipilih: addonDipilih,
+        addonTotal: addonTotal,
+        keterangan: keterangan,
+        salesTipeId: state.salesTipeID,
       );
 
-      if (res.data['success'] == true) {
-        _checkVoucherValid(res.data);
+      if (res['success'] == true) {
+        _checkVoucherValid(res);
         await _refreshFromApi();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -418,7 +338,7 @@ extension PenjualanProductsX on _PenjualanScreenState {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(res.data['message'] ?? 'Gagal mengubah package'),
+              content: Text(res['message'] ?? 'Gagal mengubah package'),
               backgroundColor: Colors.red,
             ),
           );
@@ -451,38 +371,28 @@ extension PenjualanProductsX on _PenjualanScreenState {
   // ============================================================
   Future<void> _refreshFromApi() async {
     final state = ref.read(penjualanProvider);
-    final dio = ApiService.getDio(token: _token);
 
-    final itemsRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getItems',
-        'number': state.number,
-        'device_token': _deviceToken,
-      }),
+    final itemsRes = await CartService.getCartItems(
+      number: state.number,
+      deviceToken: _deviceToken,
     );
 
-    final itemsData = List<Map<String, dynamic>>.from(itemsRes.data['data']);
+    final itemsData = List<Map<String, dynamic>>.from(itemsRes['data'] ?? []);
     final items = itemsData.map((e) => CartItem.fromJson(e)).toList();
 
-    final summaryRes = await dio.post(
-      '/penjualan.php',
-      data: FormData.fromMap({
-        'action': 'getSummary',
-        'number': state.number,
-        'store_id': state.storeID,
-        'device_token': _deviceToken,
-      }),
+    final summary = await CartService.getCartSummary(
+      number: state.number,
+      storeId: state.storeID,
+      deviceToken: _deviceToken,
     );
 
-    final summary = summaryRes.data;
     ref.read(penjualanProvider.notifier).updateItems(items);
     ref.read(penjualanProvider.notifier).updateSummary(
-          gross: (summary['gross'] as num).toDouble(),
-          diskon: (summary['diskon'] as num).toDouble(),
-          total: (summary['total'] as num).toDouble(),
-          dpp: (summary['dpp'] as num).toDouble(),
-          pajak: (summary['tax'] as num).toDouble(),
+          gross: (summary['gross'] as num?)?.toDouble() ?? 0,
+          diskon: (summary['diskon'] as num?)?.toDouble() ?? 0,
+          total: (summary['total'] as num?)?.toDouble() ?? 0,
+          dpp: (summary['dpp'] as num?)?.toDouble() ?? 0,
+          pajak: (summary['tax'] as num?)?.toDouble() ?? 0,
         );
   }
 
@@ -497,43 +407,16 @@ extension PenjualanProductsX on _PenjualanScreenState {
     });
     try {
       final state = ref.read(penjualanProvider);
-      final dio = ApiService.getDio(token: _token);
 
-      // Retry ringan (2x) untuk request ini juga — grid produk adalah
-      // hal pertama yang dilihat kasir, jadi blip koneksi sesaat
-      // sebaiknya coba pulih sendiri dulu sebelum tampil ke user
-      // sebagai "gagal, tap retry".
-      final rawRes = await _withRetry(
-        () => dio
-            .post(
-              '/penjualan.php',
-              data: FormData.fromMap({
-                'action': 'getImageProducts',
-                'organisasi_id': state.organisasiID,
-                'salestipe_id': state.salesTipeID,
-              }),
-              options: Options(responseType: ResponseType.plain),
-            )
-            .timeout(const Duration(seconds: 12)),
+      final parsed = await _withRetry(
+        () => ProductService.getImageProducts(
+          organisasiId: state.organisasiID,
+          salesTipeId: state.salesTipeID,
+        ),
         maxAttempts: 2,
       );
 
-      final rawStr = rawRes.data?.toString() ?? '';
-
-      final jsonStart = rawStr.indexOf('{');
-      if (jsonStart < 0) {
-        // Response tidak valid (bukan JSON) — ini kegagalan, bukan
-        // "memang tidak ada produk". Dulu di-return begitu saja dan
-        // _imageCategories tetap [] tanpa penanda apa pun, sehingga UI
-        // menampilkan "Tidak ada produk dengan gambar" yang menyesatkan.
-        debugPrint('[_loadImageProducts] response tidak valid: $rawStr');
-        if (mounted) _setState(() => _imageLoadError = true);
-        return;
-      }
-      final parsed = jsonDecode(rawStr.substring(jsonStart)) as Map;
-
-      // Backend baru return list of { id, nama, produk: [...] }
-      final rawData = parsed['data'];
+      final rawData = (parsed is Map) ? parsed['data'] : parsed;
       if (rawData is List) {
         final categories = rawData
             .map<Map<String, dynamic>>(
@@ -562,15 +445,10 @@ extension PenjualanProductsX on _PenjualanScreenState {
           _prewarmImageCache();
         }
       } else {
-        // 'data' bukan List sama sekali — response backend tidak
-        // sesuai kontrak, perlakukan sebagai gagal juga.
         debugPrint('[_loadImageProducts] field data bukan List: $parsed');
         if (mounted) _setState(() => _imageLoadError = true);
       }
     } catch (e) {
-      // Dulu: catch kosong, error timeout/connection reset ditelan
-      // total tanpa jejak. Sekarang ditandai + dilog supaya UI bisa
-      // tawarkan tombol retry alih-alih diam menampilkan grid kosong.
       debugPrint('[_loadImageProducts] gagal: $e');
       if (mounted) _setState(() => _imageLoadError = true);
     } finally {
@@ -614,13 +492,16 @@ extension PenjualanProductsX on _PenjualanScreenState {
       await Future.wait(
         batch.map((url) async {
           try {
-            await precacheImage(
-              CachedNetworkImageProvider(
+            final ImageProvider provider;
+            if (kIsWeb) {
+              provider = NetworkImage(url);
+            } else {
+              provider = CachedNetworkImageProvider(
                 url,
                 cacheManager: productImageCacheManager,
-              ),
-              context,
-            ).timeout(perImageTimeout);
+              );
+            }
+            await precacheImage(provider, context).timeout(perImageTimeout);
           } catch (e) {
             // Sengaja diam — gambar ini akan dicoba ulang otomatis oleh
             // CachedNetworkImage widget di grid saat benar-benar dirender
@@ -656,5 +537,4 @@ extension PenjualanProductsX on _PenjualanScreenState {
   // ============================================================
   // REMOVE & UPDATE QTY
   // ============================================================
-
 }

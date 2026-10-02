@@ -1,10 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import '../../services/api_service.dart';
+import '../../services/petty_cash_service.dart';
 import '../../services/session_service.dart';
+import '../../services/store_service.dart';
 
 const Color _navy = Color(0xFF0D1B3E);
 const Color _blue = Color(0xFF2563EB);
@@ -52,7 +52,6 @@ class KasKecilEntryScreen extends StatefulWidget {
 }
 
 class _KasKecilEntryScreenState extends State<KasKecilEntryScreen> {
-  String _token = '';
   late int _selectedStoreId;
   DateTime _tanggal = DateTime.now();
   String? _tipe; // 'masuk' atau 'keluar'
@@ -86,10 +85,10 @@ class _KasKecilEntryScreenState extends State<KasKecilEntryScreen> {
 
   Future<void> _init() async {
     final session = await SessionService.getSession();
-    _token = session['token'];
+    final userId = int.tryParse('${session['user_id'] ?? ''}');
     await Future.wait([
       _loadOpex(),
-      _loadStoreNames(session['user_id']),
+      _loadStoreNames(userId),
     ]);
   }
 
@@ -97,27 +96,18 @@ class _KasKecilEntryScreenState extends State<KasKecilEntryScreen> {
   // (MasterHandler.php) mengembalikan {id, nama} untuk semua outlet
   // yang bisa diakses user, dipakai supaya header tampilkan nama store
   // (bukan ID mentah).
-  Future<void> _loadStoreNames(dynamic userId) async {
+  Future<void> _loadStoreNames(int? userId) async {
     try {
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getStores',
-            'user_id': '$userId',
-          }));
-
+      final list = await StoreService.getStores(userId: userId);
       if (!mounted) return;
-      if (res.data['success'] == true) {
-        final list = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
-        setState(() {
-          _storeNames = {
-            for (final s in list)
-              if (s['id'] != null)
-                (s['id'] is int ? s['id'] as int : int.parse('${s['id']}')):
-                    '${s['nama']}',
-          };
-        });
-      }
+      setState(() {
+        _storeNames = {
+          for (final s in list)
+            if (s['id'] != null)
+              (s['id'] is int ? s['id'] as int : int.parse('${s['id']}')):
+                  '${s['nama']}',
+        };
+      });
     } catch (_) {
       // gagal ambil nama store — header fallback tampilkan "Store {id}"
     }
@@ -125,19 +115,14 @@ class _KasKecilEntryScreenState extends State<KasKecilEntryScreen> {
 
   Future<void> _loadOpex() async {
     try {
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getOpexPetikes',
-            'organisasi_id': widget.organisasiID,
-          }));
+      final list = await PettyCashService.getOpexCategories(
+        organisasiId: widget.organisasiID,
+      );
 
       if (!mounted) return;
-      if (res.data['success'] == true) {
-        setState(() {
-          _opexList = List<Map<String, dynamic>>.from(res.data['data'] ?? []);
-        });
-      }
+      setState(() {
+        _opexList = list;
+      });
     } catch (_) {
       // gagal memuat kategori, biarkan kosong; pesan error muncul
       // saat validasi submit
@@ -157,19 +142,16 @@ class _KasKecilEntryScreenState extends State<KasKecilEntryScreen> {
 
     setState(() => _isLoadingNumber = true);
     try {
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getNumberPetikes',
-            'tipe': value,
-            'organisasi_id': widget.organisasiID,
-          }));
+      final number = await PettyCashService.getPettyCashNumber(
+        tipe: value,
+        organisasiId: widget.organisasiID,
+      );
 
       if (!mounted) return;
-      if (res.data['success'] == true) {
-        setState(() => _number = res.data['number'] ?? '');
+      if (number != null && number.isNotEmpty) {
+        setState(() => _number = number);
       } else {
-        _showSnack(res.data['message'] ?? 'Gagal generate nomor dokumen.');
+        _showSnack('Gagal generate nomor dokumen.');
       }
     } catch (_) {
       if (!mounted) return;
@@ -277,75 +259,42 @@ class _KasKecilEntryScreenState extends State<KasKecilEntryScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final formMap = <String, dynamic>{
-        'action': 'simpanPetikes',
-        'organisasi_id': widget.organisasiID,
-        'store_id': _selectedStoreId,
-        'tipe': _tipe,
-        'tanggal': DateFormat('yyyy-MM-dd').format(_tanggal),
-        'number': _number,
-        'keterangan': _keteranganCtrl.text.trim(),
-      };
-
-      final formData = FormData.fromMap(formMap);
+      final List<int> kategoriList = [];
+      final List<String> deskripsiList = [];
+      final List<String> nominalList = [];
 
       for (final row in _rows) {
         final desc = row.deskripsiCtrl.text.trim();
         final nominal = _parseNominal(row.nominalCtrl.text);
         if (desc.isEmpty && nominal == 0) continue;
 
-        // PENTING: backend (PetikesHandler.php -> case 'simpanPetikes')
-        // membaca nominal dari $_POST['nominal'], arah transaksinya
-        // (masuk/keluar) sudah ditentukan lewat header 'tipe' -> $tipeID,
-        // bukan dari nama field nominal ini.
-        formData.fields.add(MapEntry('kategori[]', '${row.kategoriId.value}'));
-        formData.fields.add(MapEntry('deskripsi[]', desc));
-        formData.fields.add(MapEntry('nominal[]', '$nominal'));
+        kategoriList.add(row.kategoriId.value ?? 0);
+        deskripsiList.add(desc);
+        nominalList.add('$nominal');
       }
 
-      for (final img in _images) {
-        formData.files.add(MapEntry(
-          'images[]',
-          await MultipartFile.fromFile(img.path, filename: img.name),
-        ));
-      }
+      final imagePaths = _images.map((img) => img.path).toList();
 
-      final dio = ApiService.getDio(token: _token);
-      final res = await dio.post('/penjualan.php', data: formData);
-
-      if (!mounted) return;
-
-      // res.data seharusnya sudah berupa Map (dio auto-decode JSON).
-      // Kalau backend sempat mencetak warning/notice PHP sebelum
-      // echo json_encode(...), responsenya jadi bukan JSON murni dan
-      // res.data bisa berupa String, bukan Map — makanya dicek dulu
-      // supaya tidak crash diam-diam kalau format tidak sesuai.
-      final data = res.data;
-      if (data is Map && data['success'] == true) {
-        Navigator.pop(context, true);
-      } else if (data is Map) {
-        _showSnack(data['message']?.toString() ?? 'Gagal menyimpan.');
-      } else {
-        // Response bukan JSON (kemungkinan ada PHP warning/notice atau
-        // HTML error tercampur sebelum JSON). Tampilkan potongan
-        // response mentah supaya lebih mudah dilacak dari sisi backend.
-        final raw = data?.toString() ?? '';
-        _showSnack(
-          'Format response tidak dikenali dari server.'
-          '${raw.isNotEmpty ? ' (${raw.length > 200 ? raw.substring(0, 200) : raw})' : ''}',
-        );
-      }
-    } on DioException catch (e) {
-      if (!mounted) return;
-      // Tampilkan status code / pesan asli dari server (kalau ada)
-      // supaya lebih jelas ini gagal koneksi vs error di server.
-      final status = e.response?.statusCode;
-      final body = e.response?.data;
-      _showSnack(
-        status != null
-            ? 'Gagal menyimpan (HTTP $status): ${body ?? e.message}'
-            : 'Gagal terhubung ke server: ${e.message}',
+      final res = await PettyCashService.submitPettyCash(
+        storeId: _selectedStoreId,
+        organisasiId: widget.organisasiID,
+        tipe: _tipe!,
+        tanggal: DateFormat('yyyy-MM-dd').format(_tanggal),
+        number: _number,
+        keterangan: _keteranganCtrl.text.trim(),
+        kategori: kategoriList,
+        deskripsi: deskripsiList,
+        nominal: nominalList,
+        imagePaths: imagePaths,
       );
+
+      if (!mounted) return;
+
+      if (res['success'] == true) {
+        Navigator.pop(context, true);
+      } else {
+        _showSnack(res['message']?.toString() ?? 'Gagal menyimpan.');
+      }
     } catch (e) {
       if (!mounted) return;
       _showSnack('Terjadi kesalahan tak terduga: $e');
