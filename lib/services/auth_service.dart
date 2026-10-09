@@ -131,10 +131,6 @@ class AuthService {
           menus: menus,
         );
       }
-          outlets: outlets,
-          menus: menus,
-        );
-      }
 
       return responseData;
     } on DioException catch (e) {
@@ -143,12 +139,6 @@ class AuthService {
         return e.response!.data as Map<String, dynamic>;
       }
       return _handleDioError(e);
-    } catch (e) {
-      return {
-        'success': false,
-        'message': 'Gagal terhubung ke server. Periksa koneksi internet Anda.',
-      };
-    }
     } catch (e) {
       return {
         'success': false,

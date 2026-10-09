@@ -64,15 +64,6 @@ extension PenjualanDataX on _PenjualanScreenState {
         () => ShiftService.cekShiftUser(userId: _userID),
       );
 
-      final shiftUserRes = await _withRetry(
-        () => dio.post(
-          '/penjualan.php',
-          data:
-              FormData.fromMap({'action': 'cekShiftUser', 'user_id': _userID}),
-        ),
-      );
-      );
-
       int storeID = 0;
       int organisasiID = 0;
       String storeName = '';
@@ -238,7 +229,6 @@ extension PenjualanDataX on _PenjualanScreenState {
         deviceToken: _deviceToken,
       ),
     );
-    final newNumber = numberRes.data['number'];
 
     _channels = await _withRetry(
       () => PosDataService.getChannels(
