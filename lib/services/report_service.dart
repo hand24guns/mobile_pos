@@ -56,6 +56,20 @@ class ChannelTerjualReportResult {
   });
 }
 
+class KemasanTerpakaiReportResult {
+  final bool success;
+  final String? message;
+  final List<Map<String, dynamic>> items;
+  final Map<String, dynamic> summary;
+
+  const KemasanTerpakaiReportResult({
+    this.success = false,
+    this.message,
+    this.items = const [],
+    this.summary = const {},
+  });
+}
+
 class ReportService {
   // ============================================================
   // GET ONHAND REPORT — Laporan stok produk onhand per store / agregasi
@@ -361,6 +375,113 @@ class ReportService {
       message: data['message']?.toString() ?? 'Gagal memuat data channel terjual',
     );
   }
+  // ============================================================
+  // GET KEMASAN TERPAKAI REPORT — Rekap penggunaan box/kemasan
+  // (tr_invoice_kemasan) per rentang tanggal
+  //
+  // REST API: GET /v1/reports/kemasan-used?store_id=X&start_date=Y-m-d&end_date=Y-m-d
+  // Fallback: POST /penjualan.php (action: getKemasanTerpakai)
+  // ============================================================
+  static Future<KemasanTerpakaiReportResult> getKemasanTerpakaiReport({
+    int? storeId,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final dio = ApiService.getDio();
+    dynamic responseData;
+    bool restSuccess = false;
+
+    // 1. Coba RESTful API
+    try {
+      final response = await dio.get(
+        '/v1/reports/kemasan-used',
+        queryParameters: {
+          'store_id': storeId ?? 0,
+          'start_date': startDate,
+          'end_date': endDate,
+        },
+      );
+      if (response.statusCode == 200 && response.data != null) {
+        responseData = response.data;
+        restSuccess = true;
+      }
+    } catch (_) {
+      restSuccess = false;
+    }
+
+    // 2. Fallback legacy /penjualan.php
+    if (!restSuccess || responseData == null) {
+      try {
+        final response = await dio.post(
+          '/penjualan.php',
+          data: FormData.fromMap({
+            'action': 'getKemasanTerpakai',
+            'store_id': (storeId ?? 0).toString(),
+            'start_date': startDate,
+            'end_date': endDate,
+          }),
+        );
+        responseData = response.data;
+      } catch (e) {
+        try {
+          final response = await dio.post(
+            '/penjualan.php',
+            data: {
+              'action': 'getKemasanTerpakai',
+              'store_id': (storeId ?? 0).toString(),
+              'start_date': startDate,
+              'end_date': endDate,
+            },
+            options: Options(contentType: Headers.formUrlEncodedContentType),
+          );
+          responseData = response.data;
+        } catch (_) {
+          return const KemasanTerpakaiReportResult(
+            success: false,
+            message: 'Gagal terhubung ke server',
+          );
+        }
+      }
+    }
+
+    final data = _parseResponse(responseData);
+    final isSuccess = data['success'] == true ||
+        data['success'] == 1 ||
+        data['success'] == 'true';
+
+    if (isSuccess) {
+      final payload = (data['data'] is Map<String, dynamic>)
+          ? data['data'] as Map<String, dynamic>
+          : data;
+
+      final rawItems = payload['items'] ?? payload['data'] ?? [];
+      final List<Map<String, dynamic>> items = [];
+      if (rawItems is List) {
+        for (final item in rawItems) {
+          if (item is Map) {
+            items.add(Map<String, dynamic>.from(item));
+          }
+        }
+      }
+
+      final summary = (payload['summary'] is Map)
+          ? Map<String, dynamic>.from(payload['summary'])
+          : <String, dynamic>{};
+
+      return KemasanTerpakaiReportResult(
+        success: true,
+        items: items,
+        summary: summary,
+      );
+    }
+
+    return KemasanTerpakaiReportResult(
+      success: false,
+      message:
+          data['message']?.toString() ?? 'Gagal memuat penggunaan box',
+    );
+  }
+
   // ============================================================
   // GET PAYMENT REPORT — Rekap pembayaran per metode transaksi
   //

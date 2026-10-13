@@ -128,6 +128,7 @@ extension PenjualanProductsX on _PenjualanScreenState {
 
       if (res['success'] == true) {
         _checkVoucherValid(res);
+        _checkKemasanReset(res);
         await _refreshFromApi();
         _focusSku();
       } else {
@@ -172,6 +173,7 @@ extension PenjualanProductsX on _PenjualanScreenState {
 
       if (res['success'] == true) {
         _checkVoucherValid(res);
+        _checkKemasanReset(res);
         await _refreshFromApi();
         _focusSku();
       } else {
@@ -325,6 +327,7 @@ extension PenjualanProductsX on _PenjualanScreenState {
 
       if (res['success'] == true) {
         _checkVoucherValid(res);
+        _checkKemasanReset(res);
         await _refreshFromApi();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -387,6 +390,8 @@ extension PenjualanProductsX on _PenjualanScreenState {
     );
 
     ref.read(penjualanProvider.notifier).updateItems(items);
+    // Cart kosong → override box tidak relevan lagi
+    if (items.isEmpty) _clearKemasanState();
     ref.read(penjualanProvider.notifier).updateSummary(
           gross: (summary['gross'] as num?)?.toDouble() ?? 0,
           diskon: (summary['diskon'] as num?)?.toDouble() ?? 0,

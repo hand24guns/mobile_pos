@@ -254,6 +254,9 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                 ),
               ),
               const SizedBox(width: 8),
+              // Box / Kemasan (override pemakaian box)
+              _buildKemasanButton(iconSize: 16, hPad: 10, vPad: 9),
+              const SizedBox(width: 8),
               // Tambah Item — insert baris baru terpisah, tidak merge
               // dengan baris produk yang sama (dipakai a.l. untuk item gratis)
               OutlinedButton.icon(
@@ -271,6 +274,7 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
               ),
             ],
           ),
+          _buildKemasanIndicator(),
           const SizedBox(height: 6),
 
           // ── Baris 4: Keterangan | Cari SKU (2 kolom dalam 1 baris) ──
@@ -553,6 +557,14 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
                 ),
               ),
               SizedBox(width: ultraCompact ? 4 : 6),
+              // Box / Kemasan
+              _buildKemasanButton(
+                iconSize: iconSize,
+                hPad: ultraCompact ? 6 : 8,
+                vPad: fieldVPad,
+                shrink: true,
+              ),
+              SizedBox(width: ultraCompact ? 4 : 6),
               // Tambah Item
               OutlinedButton.icon(
                 onPressed: _showAddItemSheet,
@@ -571,6 +583,7 @@ extension PenjualanHeaderWidgetsX on _PenjualanScreenState {
               ),
             ],
           ),
+          _buildKemasanIndicator(),
           SizedBox(height: rowGap),
 
           // ── Baris C: Keterangan | SKU Search (2-kolom) ──

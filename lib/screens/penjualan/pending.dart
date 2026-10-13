@@ -306,6 +306,8 @@ extension PenjualanPendingX on _PenjualanScreenState {
         _activePendingOrderID = salesOrderID;
         _activePendingLabel = res['order_nama'] as String? ?? '';
       });
+      // Override box dari keranjang sebelumnya tidak boleh terbawa
+      _clearKemasanState();
 
       // FIX: Load items langsung dari temp_invoice tanpa recalculate harga.
       // _refreshFromApi() yang lama menyebabkan hpj di-overwrite dengan harga

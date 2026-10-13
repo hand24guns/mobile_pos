@@ -321,6 +321,7 @@ extension PenjualanPaymentX on _PenjualanScreenState {
       _activePendingOrderID = null;
       _activePendingLabel = '';
     });
+    _clearKemasanState();
     ref.read(penjualanProvider.notifier).setReturSource('');
     _memberController.clear();
     _nominalController.clear();

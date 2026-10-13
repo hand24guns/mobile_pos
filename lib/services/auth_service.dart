@@ -37,9 +37,10 @@ class AuthService {
           },
         );
       } on DioException catch (dioErr) {
-        // Backward compatibility: jika backend belum mendeploy endpoint /v1/auth/login (404 Not Found),
-        // fallback sementara ke endpoint legacy /auth.php
-        if (dioErr.response?.statusCode == 404) {
+        final is404 = dioErr.response?.statusCode == 404;
+        final isBlockedOrOffline =
+            dioErr.type == DioExceptionType.connectionError;
+        if (is404 || isBlockedOrOffline) {
           response = await dio.post(
             '/auth.php',
             data: FormData.fromMap({
@@ -54,9 +55,8 @@ class AuthService {
       }
 
       final dynamic rawData = response.data;
-      final Map<String, dynamic> responseData = rawData is Map<String, dynamic>
-          ? rawData
-          : <String, dynamic>{};
+      final Map<String, dynamic> responseData =
+          rawData is Map<String, dynamic> ? rawData : <String, dynamic>{};
 
       final bool isSuccess = responseData['success'] == true;
 
@@ -70,23 +70,19 @@ class AuthService {
         final rawToken = payload['token'] ?? responseData['token'];
         final token = rawToken?.toString() ?? '';
 
-        final rawUserId = payload['user_id'] ??
-            payload['id'] ??
-            responseData['user_id'];
+        final rawUserId =
+            payload['user_id'] ?? payload['id'] ?? responseData['user_id'];
         final userId = rawUserId is int
             ? rawUserId
             : int.tryParse(rawUserId?.toString() ?? '') ?? 0;
 
-        final nama = (payload['nama'] ??
-                payload['name'] ??
-                responseData['nama'] ??
-                '')
-            .toString();
+        final nama =
+            (payload['nama'] ?? payload['name'] ?? responseData['nama'] ?? '')
+                .toString();
 
-        final usernameVal = (payload['username'] ??
-                responseData['username'] ??
-                username)
-            .toString();
+        final usernameVal =
+            (payload['username'] ?? responseData['username'] ?? username)
+                .toString();
 
         final dynamic rawOutlets = payload['outlets'] ??
             payload['stores'] ??
@@ -98,18 +94,21 @@ class AuthService {
 
         List<int> outlets = [];
         if (rawOutlets is List) {
-          outlets = rawOutlets.map((e) {
-            if (e is int) return e;
-            if (e is num) return e.toInt();
-            if (e is Map) {
-              final id = e['id'] ??
-                  e['dim_divisi_id'] ??
-                  e['store_id'] ??
-                  e['outlet_id'];
-              return int.tryParse(id?.toString() ?? '') ?? 0;
-            }
-            return int.tryParse(e.toString().trim()) ?? 0;
-          }).where((e) => e > 0).toList();
+          outlets = rawOutlets
+              .map((e) {
+                if (e is int) return e;
+                if (e is num) return e.toInt();
+                if (e is Map) {
+                  final id = e['id'] ??
+                      e['dim_divisi_id'] ??
+                      e['store_id'] ??
+                      e['outlet_id'];
+                  return int.tryParse(id?.toString() ?? '') ?? 0;
+                }
+                return int.tryParse(e.toString().trim()) ?? 0;
+              })
+              .where((e) => e > 0)
+              .toList();
         } else if (rawOutlets is String && rawOutlets.trim().isNotEmpty) {
           outlets = rawOutlets
               .split(',')
@@ -185,9 +184,10 @@ class AuthService {
           },
         );
       } on DioException catch (dioErr) {
-        // Backward compatibility fallback: jika endpoint REST /v1/auth/change-password belum ada (404),
-        // fallback ke legacy endpoint POST /penjualan.php
-        if (dioErr.response?.statusCode == 404) {
+        final is404 = dioErr.response?.statusCode == 404;
+        final isBlockedOrOffline =
+            dioErr.type == DioExceptionType.connectionError;
+        if (is404 || isBlockedOrOffline) {
           response = await dio.post(
             '/penjualan.php',
             data: FormData.fromMap({
@@ -202,9 +202,8 @@ class AuthService {
       }
 
       final dynamic rawData = response.data;
-      final Map<String, dynamic> responseData = rawData is Map<String, dynamic>
-          ? rawData
-          : <String, dynamic>{};
+      final Map<String, dynamic> responseData =
+          rawData is Map<String, dynamic> ? rawData : <String, dynamic>{};
 
       return responseData;
     } on DioException catch (e) {
@@ -280,12 +279,14 @@ class AuthService {
       case DioExceptionType.receiveTimeout:
         return {
           'success': false,
-          'message': 'Batas waktu koneksi habis (timeout). Silakan periksa jaringan Anda.',
+          'message':
+              'Batas waktu koneksi habis (timeout). Silakan periksa jaringan Anda.',
         };
       case DioExceptionType.connectionError:
         return {
           'success': false,
-          'message': 'Gagal terhubung ke server. Periksa koneksi internet atau pengaturan URL server.',
+          'message':
+              'Gagal terhubung ke server. Periksa koneksi internet atau pengaturan URL server.',
         };
       case DioExceptionType.cancel:
         return {

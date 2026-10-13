@@ -9,7 +9,7 @@ extension PenjualanCartX on _PenjualanScreenState {
       final state = ref.read(penjualanProvider);
       final item = state.items[index];
 
-      await CartService.deleteItem(
+      final delRes = await CartService.deleteItem(
         itemId: item.id,
         number: state.number,
         deviceToken: _deviceToken,
@@ -20,6 +20,7 @@ extension PenjualanCartX on _PenjualanScreenState {
         salesTipeId: state.salesTipeID,
       );
 
+      if (delRes['success'] == true) _checkKemasanReset(delRes);
       await _refreshFromApi();
     });
   }
@@ -58,6 +59,7 @@ extension PenjualanCartX on _PenjualanScreenState {
         return;
       }
 
+      _checkKemasanReset(resMap);
       await _refreshFromApi();
     });
   }
@@ -333,6 +335,7 @@ extension PenjualanCartX on _PenjualanScreenState {
 
       if (loadRes['success'] == true) {
         ref.read(penjualanProvider.notifier).setReturSource(returNumber);
+        _clearKemasanState(); // mode retur: tidak ada override box
         await _refreshFromApi();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -854,6 +857,7 @@ extension PenjualanCartX on _PenjualanScreenState {
       );
 
       if (res['success'] == true) {
+        _checkKemasanReset(res);
         await _refreshFromApi();
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

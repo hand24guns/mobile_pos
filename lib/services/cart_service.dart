@@ -958,6 +958,73 @@ class CartService {
     return [];
   }
 
+  // ============================================================
+  // KEMASAN / BOX (override kasir) — hanya lewat penjualan.php
+  // Box dihitung otomatis server saat prosesBayar; 3 endpoint ini
+  // hanya untuk melihat hitungan, menyimpan override, dan reset.
+  // ============================================================
+  static Future<Map<String, dynamic>> _postKemasan(
+    Map<String, dynamic> fields,
+  ) async {
+    try {
+      final res = await ApiService.getDio().post(
+        '/penjualan.php',
+        data: FormData.fromMap(fields),
+      );
+      final data = _parseData(res.data);
+      if (data.isEmpty) {
+        return {'success': false, 'message': 'Respons server tidak valid'};
+      }
+      return data;
+    } catch (_) {
+      return {'success': false, 'message': 'Gagal terhubung ke server'};
+    }
+  }
+
+  /// Hitungan box saat ini (cart_kosong / sumber auto|manual / items / opsi).
+  static Future<Map<String, dynamic>> getKemasan({
+    required String number,
+    required int storeId,
+    required int organisasiId,
+    required String deviceToken,
+  }) {
+    return _postKemasan({
+      'action': 'getKemasan',
+      'number': number,
+      'store_id': storeId,
+      'organisasi_id': organisasiId,
+      'device_token': deviceToken,
+    });
+  }
+
+  /// Simpan override. [items] = [{id, qty}]; list kosong = "tanpa box".
+  static Future<Map<String, dynamic>> simpanKemasan({
+    required String number,
+    required int organisasiId,
+    required String deviceToken,
+    required List<Map<String, dynamic>> items,
+  }) {
+    return _postKemasan({
+      'action': 'simpanKemasan',
+      'number': number,
+      'organisasi_id': organisasiId,
+      'device_token': deviceToken,
+      'items': jsonEncode(items),
+    });
+  }
+
+  /// Hapus override → kembali ke hitungan otomatis.
+  static Future<Map<String, dynamic>> resetKemasan({
+    required String number,
+    required String deviceToken,
+  }) {
+    return _postKemasan({
+      'action': 'resetKemasan',
+      'number': number,
+      'device_token': deviceToken,
+    });
+  }
+
   static Map<String, dynamic> _parseData(dynamic rawData) {
     if (rawData is Map<String, dynamic>) {
       return rawData;

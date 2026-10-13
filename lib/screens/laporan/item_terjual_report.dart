@@ -38,6 +38,13 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
   Map<String, dynamic> _summary = {};
   String? _error;
 
+  // Penggunaan box/kemasan (tr_invoice_kemasan) — di-load bersamaan
+  // dengan item terjual, tapi errornya terpisah supaya kegagalan box
+  // tidak menutupi data penjualan.
+  List<dynamic> _boxRows = [];
+  Map<String, dynamic> _boxSummary = {};
+  String? _boxError;
+
   DateTime _startDate = DateTime.now();
   DateTime _endDate = DateTime.now();
 
@@ -94,14 +101,22 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
     setState(() {
       _loadingData = true;
       _error = null;
+      _boxError = null;
     });
+
+    final start = _formatDate(_startDate);
+    final end = _formatDate(_endDate);
+
+    // Box dimuat paralel; kegagalannya ditangani sendiri (tidak throw).
+    final boxFuture = _loadBoxTerpakai(start, end);
 
     try {
       final result = await ReportService.getItemTerjualReport(
         storeId: _selectedStore,
-        startDate: _formatDate(_startDate),
-        endDate: _formatDate(_endDate),
+        startDate: start,
+        endDate: end,
       );
+      await boxFuture;
 
       if (!mounted) return;
       if (result.success) {
@@ -120,6 +135,34 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
       setState(() => _error = 'Gagal terhubung ke server');
     } finally {
       if (mounted) setState(() => _loadingData = false);
+    }
+  }
+
+  Future<void> _loadBoxTerpakai(String start, String end) async {
+    try {
+      final result = await ReportService.getKemasanTerpakaiReport(
+        storeId: _selectedStore,
+        startDate: start,
+        endDate: end,
+      );
+      if (!mounted) return;
+      setState(() {
+        if (result.success) {
+          _boxRows = result.items;
+          _boxSummary = result.summary;
+        } else {
+          _boxRows = [];
+          _boxSummary = {};
+          _boxError = result.message ?? 'Gagal memuat penggunaan box';
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _boxRows = [];
+        _boxSummary = {};
+        _boxError = 'Gagal terhubung ke server';
+      });
     }
   }
 
@@ -171,15 +214,18 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
     }
   }
 
-  List<dynamic> get _filteredRows {
-    if (_searchQuery.isEmpty) return _rows;
-    return _rows.where((r) {
+  List<dynamic> _applySearch(List<dynamic> source) {
+    if (_searchQuery.isEmpty) return source;
+    return source.where((r) {
       final item = r as Map<String, dynamic>;
       final kode = (item['kode'] ?? '').toString().toLowerCase();
       final nama = (item['nama'] ?? '').toString().toLowerCase();
       return kode.contains(_searchQuery) || nama.contains(_searchQuery);
     }).toList();
   }
+
+  List<dynamic> get _filteredRows => _applySearch(_rows);
+  List<dynamic> get _filteredBoxRows => _applySearch(_boxRows);
 
   // ============================================================
   // BUILD
@@ -188,17 +234,23 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
   // bar 3-tombol biasanya menyisakan tinggi < 600px untuk body konten.
   static const double _compactHeightBreakpoint = 600;
 
+  // Ambang batas "split": lebar cukup (tablet / landscape) -> Item
+  // Terjual di kiri, Penggunaan Box di kanan. Di bawah itu (portrait)
+  // card ditumpuk vertikal dalam 1 scroll view.
+  static const double _splitWidthBreakpoint = 720;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final compact = constraints.maxHeight < _compactHeightBreakpoint;
+      final split = constraints.maxWidth >= _splitWidthBreakpoint;
       return Container(
         color: _bgGray,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (compact) _buildCompactToolbar() else _buildPortraitHeader(),
-            Expanded(child: _buildBody(compact: compact)),
+            Expanded(child: _buildBody(compact: compact, split: split)),
           ],
         ),
       );
@@ -553,7 +605,7 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
     );
   }
 
-  Widget _buildBody({bool compact = false}) {
+  Widget _buildBody({bool compact = false, bool split = false}) {
     if (_loadingData && !_hasLoadedOnce) {
       return const Center(child: CircularProgressIndicator(color: _blue));
     }
@@ -581,36 +633,211 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
       );
     }
 
-    final filtered = _filteredRows;
+    final salesPanel = _buildPanel(
+      title: 'Item Terjual',
+      icon: Icons.trending_up_rounded,
+      color: _blue,
+      subtitle: '${_formatNumber(_rows.length)} item',
+      rows: _filteredRows,
+      totalRows: _rows.length,
+      emptyText: 'Tidak ada item terjual di rentang tanggal ini',
+      compact: compact,
+      scrollable: split,
+      rowBuilder: (item, i) => _buildRowCard(item, i, compact),
+    );
 
-    if (filtered.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final boxQty = (_boxSummary['total_qty'] as num?) ?? 0;
+    final boxPanel = _buildPanel(
+      title: 'Penggunaan Box',
+      icon: Icons.inventory_2_outlined,
+      color: _purple,
+      subtitle: '${_formatNumber(boxQty)} box terpakai',
+      rows: _filteredBoxRows,
+      totalRows: _boxRows.length,
+      emptyText: 'Tidak ada penggunaan box di rentang tanggal ini',
+      error: _boxError,
+      compact: compact,
+      scrollable: split,
+      rowBuilder: (item, i) => _buildRowCard(
+        item,
+        i,
+        compact,
+        valueKey: 'total_hpp',
+        qtyLabel: 'box',
+        hideZeroValue: true,
+      ),
+    );
+
+    final pad = compact ? 8.0 : 16.0;
+
+    if (split) {
+      // Tablet / landscape: kiri = item terjual, kanan = penggunaan box.
+      // Tiap card scroll sendiri; pull-to-refresh ada di dalam masing-masing.
+      return Padding(
+        padding: EdgeInsets.all(pad),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(Icons.trending_up_rounded, size: 40, color: Colors.grey[350]),
-            const SizedBox(height: 8),
-            Text(
-              _rows.isEmpty
-                  ? 'Tidak ada item terjual di rentang tanggal ini'
-                  : 'Tidak ada produk yang cocok',
-              style: TextStyle(color: Colors.grey[500]),
-            ),
+            Expanded(child: salesPanel),
+            SizedBox(width: pad),
+            Expanded(child: boxPanel),
           ],
         ),
       );
     }
 
+    // Portrait: 1 view, card penjualan di atas, card box di bawahnya.
     return RefreshIndicator(
       color: _blue,
       onRefresh: _loadItemTerjual,
-      child: ListView.separated(
+      child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(compact ? 8 : 16),
-        itemCount: filtered.length,
-        separatorBuilder: (_, __) => SizedBox(height: compact ? 6 : 10),
+        padding: EdgeInsets.all(pad),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            salesPanel,
+            SizedBox(height: pad),
+            boxPanel,
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Panel/card: header (judul + ringkasan) + daftar baris ────
+  // scrollable = true  -> list scroll sendiri (butuh tinggi terbatas,
+  //                       dipakai di mode split).
+  // scrollable = false -> list ikut scroll halaman (portrait).
+  Widget _buildPanel({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required String subtitle,
+    required List<dynamic> rows,
+    required int totalRows,
+    required String emptyText,
+    required bool compact,
+    required bool scrollable,
+    required Widget Function(Map<String, dynamic> item, int index) rowBuilder,
+    String? error,
+  }) {
+    final gap = SizedBox(height: compact ? 6 : 10);
+
+    Widget content;
+    if (error != null) {
+      content = _panelMessage(Icons.error_outline_rounded, error,
+          iconColor: Colors.red[300]);
+    } else if (rows.isEmpty) {
+      content = _panelMessage(
+        Icons.inbox_outlined,
+        totalRows == 0 ? emptyText : 'Tidak ada produk yang cocok',
+      );
+    } else if (scrollable) {
+      content = RefreshIndicator(
+        color: _blue,
+        onRefresh: _loadItemTerjual,
+        child: ListView.separated(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.all(compact ? 10 : 14),
+          itemCount: rows.length,
+          separatorBuilder: (_, __) => gap,
+          itemBuilder: (context, i) =>
+              rowBuilder(rows[i] as Map<String, dynamic>, i),
+        ),
+      );
+    } else {
+      content = ListView.separated(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(14),
+        itemCount: rows.length,
+        separatorBuilder: (_, __) => gap,
         itemBuilder: (context, i) =>
-            _buildRowCard(filtered[i] as Map<String, dynamic>, i, compact),
+            rowBuilder(rows[i] as Map<String, dynamic>, i),
+      );
+    }
+
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: _navy.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: scrollable ? MainAxisSize.max : MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, compact ? 12 : 16, 16, 12),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 18, color: color),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: _navy),
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    subtitle,
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: color),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: Colors.grey.shade200),
+          if (scrollable) Expanded(child: content) else content,
+        ],
+      ),
+    );
+  }
+
+  Widget _panelMessage(IconData icon, String text, {Color? iconColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 36, color: iconColor ?? Colors.grey[350]),
+            const SizedBox(height: 8),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[500]),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -631,24 +858,30 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
     return colors[index % colors.length];
   }
 
-  Widget _buildRowCard(Map<String, dynamic> item, int i, bool compact) {
+  // Dipakai untuk baris item terjual (default) dan penggunaan box
+  // (valueKey: 'total_hpp', qtyLabel: 'box'). hideZeroValue menyembunyikan
+  // nominal kalau 0 (hpp box sering belum diisi).
+  Widget _buildRowCard(
+    Map<String, dynamic> item,
+    int i,
+    bool compact, {
+    String valueKey = 'netto',
+    String qtyLabel = 'qty',
+    bool hideZeroValue = false,
+  }) {
     final nama = '${item['nama'] ?? ''}';
     final kode = '${item['kode'] ?? ''}';
     final qty = (item['qty'] as num?) ?? 0;
-    final netto = (item['netto'] as num?) ?? 0;
+    final netto = (item[valueKey] as num?) ?? 0;
+    final showValue = !(hideZeroValue && netto == 0);
     final accent = _rowAccent(i);
 
+    // Baris flat (tanpa shadow) karena sudah berada di dalam card besar.
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: const Color(0xFFF7F9FD),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
       ),
       padding:
           EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 10 : 12),
@@ -704,17 +937,19 @@ class _ItemTerjualReportScreenState extends State<ItemTerjualReportScreen> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              '${_formatNumber(qty)} qty',
+              '${_formatNumber(qty)} $qtyLabel',
               style: TextStyle(
                   color: accent, fontWeight: FontWeight.w600, fontSize: 11),
             ),
           ),
-          const SizedBox(width: 10),
-          Text(
-            _formatCurrency(netto),
-            style: const TextStyle(
-                color: _navy, fontWeight: FontWeight.bold, fontSize: 14),
-          ),
+          if (showValue) ...[
+            const SizedBox(width: 10),
+            Text(
+              _formatCurrency(netto),
+              style: const TextStyle(
+                  color: _navy, fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+          ],
         ],
       ),
     );

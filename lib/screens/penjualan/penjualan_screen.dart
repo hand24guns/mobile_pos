@@ -40,6 +40,7 @@ part 'widgets_header.dart';
 part 'widgets_grid.dart';
 part 'widgets_cart.dart';
 part 'widgets_summary.dart';
+part 'kemasan.dart';
 
 class PenjualanScreen extends ConsumerStatefulWidget {
   const PenjualanScreen({super.key});
@@ -61,6 +62,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   // Default false → _focusSku() memberi fokus tanpa membuka keyboard.
   bool _skuKeyboardVisible = false;
   String _activeVoucher = '';
+
+  // ── Kemasan / Box (override kasir) ─────────────────────────────
+  // State minimal: apakah ada override aktif + ringkasan untuk indikator.
+  // Sumber kebenaran tetap di server (temp_kemasan); ini hanya cerminan UI.
+  bool _kemasanOverrideActive = false;
+  String _kemasanSummary = ''; // mis. "1x Box 12 pcs" / "tanpa box"
+  bool _kemasanLoading = false;
 
   // Track pending order yang sedang di-retrieve (null = transaksi baru)
   int? _activePendingOrderID;
