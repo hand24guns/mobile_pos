@@ -5,8 +5,7 @@ import 'api_service.dart';
 class PendingOrderService {
   // ============================================================
   // SIMPAN / UPDATE PENDING ORDER
-  // REST API: POST /v1/pending-orders
-  // Fallback: POST /penjualan.php (action: simpanPending)
+  // RPC: POST /penjualan.php (action: simpanPending)
   // ============================================================
   static Future<Map<String, dynamic>> savePending({
     required String number,
@@ -22,7 +21,6 @@ class PendingOrderService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
     final payload = {
       'number': number,
@@ -37,33 +35,17 @@ class PendingOrderService {
       if (pendingOrderId != null) 'pending_order_id': pendingOrderId,
     };
 
-    // 1. Coba REST API
     try {
-      final res = pendingOrderId != null
-          ? await dio.put('/v1/pending-orders/$pendingOrderId', data: payload)
-          : await dio.post('/v1/pending-orders', data: payload);
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'simpanPending',
+          ...payload,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'simpanPending',
-            ...payload,
-          }),
-        );
-        responseData = res.data;
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal terhubung ke server'};
-      }
+      return {'success': false, 'message': 'Gagal terhubung ke server'};
     }
 
     return _parseData(responseData);
@@ -71,43 +53,25 @@ class PendingOrderService {
 
   // ============================================================
   // GET DAFTAR PENDING ORDERS
-  // REST API: GET /v1/pending-orders?store_id=X
-  // Fallback: POST /penjualan.php (action: getPendingOrders)
+  // RPC: POST /penjualan.php (action: getPendingOrders)
   // ============================================================
   static Future<List<Map<String, dynamic>>> getPendingOrders({
     required int storeId,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.get('/v1/pending-orders', queryParameters: {
-        'store_id': storeId,
-      });
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getPendingOrders',
+          'store_id': storeId,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getPendingOrders',
-            'store_id': storeId,
-          }),
-        );
-        responseData = res.data;
-      } catch (_) {
-        return [];
-      }
+      return [];
     }
 
     final data = _parseData(responseData);
@@ -123,8 +87,7 @@ class PendingOrderService {
 
   // ============================================================
   // RETRIEVE PENDING ORDER
-  // REST API: POST /v1/pending-orders/{id}/retrieve
-  // Fallback: POST /penjualan.php (action: retrievePending)
+  // RPC: POST /penjualan.php (action: retrievePending)
   // ============================================================
   static Future<Map<String, dynamic>> retrievePending({
     required int salesOrderId,
@@ -133,7 +96,6 @@ class PendingOrderService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
     final payload = {
       'sales_order_id': salesOrderId,
@@ -141,32 +103,17 @@ class PendingOrderService {
       'device_token': deviceToken,
     };
 
-    // 1. Coba REST API
     try {
-      final res =
-          await dio.post('/v1/pending-orders/$salesOrderId/retrieve', data: payload);
-      if (res.statusCode == 200) {
-        responseData = res.data;
-        restSuccess = true;
-      }
-    } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'retrievePending',
-            ...payload,
-          }),
-        );
-        responseData = res.data;
-      } catch (e) {
-        return {'success': false, 'message': 'Gagal retrieve order: $e'};
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'retrievePending',
+          ...payload,
+        }),
+      );
+      responseData = res.data;
+    } catch (e) {
+      return {'success': false, 'message': 'Gagal retrieve order: $e'};
     }
 
     return _parseData(responseData);
@@ -174,8 +121,7 @@ class PendingOrderService {
 
   // ============================================================
   // DELETE / VOID PENDING ORDER
-  // REST API: DELETE /v1/pending-orders/{id}
-  // Fallback: POST /penjualan.php (action: deletePending)
+  // RPC: POST /penjualan.php (action: deletePending)
   // ============================================================
   static Future<bool> deletePending({
     required int salesOrderId,
@@ -183,36 +129,19 @@ class PendingOrderService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.delete('/v1/pending-orders/$salesOrderId', data: {
-        'user_id': userId,
-      });
-      if (res.statusCode == 200 || res.statusCode == 204) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'deletePending',
+          'sales_order_id': salesOrderId,
+          'user_id': userId,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'deletePending',
-            'sales_order_id': salesOrderId,
-            'user_id': userId,
-          }),
-        );
-        responseData = res.data;
-      } catch (_) {
-        return false;
-      }
+      return false;
     }
 
     final data = _parseData(responseData);
@@ -221,41 +150,25 @@ class PendingOrderService {
 
   // ============================================================
   // GET PENDING ORDER ITEMS
-  // REST API: GET /v1/pending-orders/{id}/items
-  // Fallback: POST /penjualan.php (action: getPendingOrderItems)
+  // RPC: POST /penjualan.php (action: getPendingOrderItems)
   // ============================================================
   static Future<Map<String, dynamic>> getPendingOrderItems({
     required int salesOrderId,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.get('/v1/pending-orders/$salesOrderId/items');
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getPendingOrderItems',
+          'sales_order_id': salesOrderId,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getPendingOrderItems',
-            'sales_order_id': salesOrderId,
-          }),
-        );
-        responseData = res.data;
-      } catch (_) {
-        return {'success': false, 'items': []};
-      }
+      return {'success': false, 'items': []};
     }
 
     return _parseData(responseData);

@@ -73,60 +73,26 @@ class KemasanTerpakaiReportResult {
 class ReportService {
   // ============================================================
   // GET ONHAND REPORT — Laporan stok produk onhand per store / agregasi
-  //
-  // REST API: GET /v1/reports/onhand?store_id=X
-  // Fallback: POST /penjualan.php (action: getOnhand)
+  // RPC: POST /penjualan.php (action: getOnhand)
   // ============================================================
   static Future<OnhandReportResult> getOnhandReport({int? storeId}) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba RESTful API
     try {
-      final response = await dio.get(
-        '/v1/reports/onhand',
-        queryParameters: {
-          'store_id': storeId ?? 0,
-        },
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getOnhand',
+          'store_id': (storeId ?? 0).toString(),
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getOnhand',
-            'store_id': (storeId ?? 0).toString(),
-          }),
-        );
-        responseData = response.data;
-      } catch (e) {
-        try {
-          final response = await dio.post(
-            '/penjualan.php',
-            data: {
-              'action': 'getOnhand',
-              'store_id': (storeId ?? 0).toString(),
-            },
-            options: Options(contentType: Headers.formUrlEncodedContentType),
-          );
-          responseData = response.data;
-        } catch (_) {
-          return const OnhandReportResult(
-            success: false,
-            message: 'Gagal terhubung ke server',
-          );
-        }
-      }
+      return const OnhandReportResult(
+        success: false,
+        message: 'Gagal terhubung ke server',
+      );
     }
 
     final data = _parseResponse(responseData);
@@ -168,9 +134,7 @@ class ReportService {
 
   // ============================================================
   // GET ITEM TERJUAL REPORT — Rekap item terjual per rentang tanggal
-  //
-  // REST API: GET /v1/reports/items-sold?store_id=X&start_date=Y-m-d&end_date=Y-m-d
-  // Fallback: POST /penjualan.php (action: getItemTerjual)
+  // RPC: POST /penjualan.php (action: getItemTerjual)
   // ============================================================
   static Future<ItemTerjualReportResult> getItemTerjualReport({
     int? storeId,
@@ -179,59 +143,23 @@ class ReportService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba RESTful API
     try {
-      final response = await dio.get(
-        '/v1/reports/items-sold',
-        queryParameters: {
-          'store_id': storeId ?? 0,
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getItemTerjual',
+          'store_id': (storeId ?? 0).toString(),
           'start_date': startDate,
           'end_date': endDate,
-        },
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getItemTerjual',
-            'store_id': (storeId ?? 0).toString(),
-            'start_date': startDate,
-            'end_date': endDate,
-          }),
-        );
-        responseData = response.data;
-      } catch (e) {
-        try {
-          final response = await dio.post(
-            '/penjualan.php',
-            data: {
-              'action': 'getItemTerjual',
-              'store_id': (storeId ?? 0).toString(),
-              'start_date': startDate,
-              'end_date': endDate,
-            },
-            options: Options(contentType: Headers.formUrlEncodedContentType),
-          );
-          responseData = response.data;
-        } catch (_) {
-          return const ItemTerjualReportResult(
-            success: false,
-            message: 'Gagal terhubung ke server',
-          );
-        }
-      }
+      return const ItemTerjualReportResult(
+        success: false,
+        message: 'Gagal terhubung ke server',
+      );
     }
 
     final data = _parseResponse(responseData);
@@ -273,9 +201,7 @@ class ReportService {
 
   // ============================================================
   // GET CHANNEL TERJUAL REPORT — Rekap transaksi & nominal per channel
-  //
-  // REST API: GET /v1/reports/channels-sold?store_id=X&start_date=Y-m-d&end_date=Y-m-d
-  // Fallback: POST /penjualan.php (action: getChannelTerjual)
+  // RPC: POST /penjualan.php (action: getChannelTerjual)
   // ============================================================
   static Future<ChannelTerjualReportResult> getChannelTerjualReport({
     int? storeId,
@@ -284,59 +210,23 @@ class ReportService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba RESTful API
     try {
-      final response = await dio.get(
-        '/v1/reports/channels-sold',
-        queryParameters: {
-          'store_id': storeId ?? 0,
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getChannelTerjual',
+          'store_id': (storeId ?? 0).toString(),
           'start_date': startDate,
           'end_date': endDate,
-        },
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getChannelTerjual',
-            'store_id': (storeId ?? 0).toString(),
-            'start_date': startDate,
-            'end_date': endDate,
-          }),
-        );
-        responseData = response.data;
-      } catch (e) {
-        try {
-          final response = await dio.post(
-            '/penjualan.php',
-            data: {
-              'action': 'getChannelTerjual',
-              'store_id': (storeId ?? 0).toString(),
-              'start_date': startDate,
-              'end_date': endDate,
-            },
-            options: Options(contentType: Headers.formUrlEncodedContentType),
-          );
-          responseData = response.data;
-        } catch (_) {
-          return const ChannelTerjualReportResult(
-            success: false,
-            message: 'Gagal terhubung ke server',
-          );
-        }
-      }
+      return const ChannelTerjualReportResult(
+        success: false,
+        message: 'Gagal terhubung ke server',
+      );
     }
 
     final data = _parseResponse(responseData);
@@ -375,12 +265,11 @@ class ReportService {
       message: data['message']?.toString() ?? 'Gagal memuat data channel terjual',
     );
   }
+
   // ============================================================
   // GET KEMASAN TERPAKAI REPORT — Rekap penggunaan box/kemasan
   // (tr_invoice_kemasan) per rentang tanggal
-  //
-  // REST API: GET /v1/reports/kemasan-used?store_id=X&start_date=Y-m-d&end_date=Y-m-d
-  // Fallback: POST /penjualan.php (action: getKemasanTerpakai)
+  // RPC: POST /penjualan.php (action: getKemasanTerpakai)
   // ============================================================
   static Future<KemasanTerpakaiReportResult> getKemasanTerpakaiReport({
     int? storeId,
@@ -389,59 +278,23 @@ class ReportService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba RESTful API
     try {
-      final response = await dio.get(
-        '/v1/reports/kemasan-used',
-        queryParameters: {
-          'store_id': storeId ?? 0,
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getKemasanTerpakai',
+          'store_id': (storeId ?? 0).toString(),
           'start_date': startDate,
           'end_date': endDate,
-        },
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getKemasanTerpakai',
-            'store_id': (storeId ?? 0).toString(),
-            'start_date': startDate,
-            'end_date': endDate,
-          }),
-        );
-        responseData = response.data;
-      } catch (e) {
-        try {
-          final response = await dio.post(
-            '/penjualan.php',
-            data: {
-              'action': 'getKemasanTerpakai',
-              'store_id': (storeId ?? 0).toString(),
-              'start_date': startDate,
-              'end_date': endDate,
-            },
-            options: Options(contentType: Headers.formUrlEncodedContentType),
-          );
-          responseData = response.data;
-        } catch (_) {
-          return const KemasanTerpakaiReportResult(
-            success: false,
-            message: 'Gagal terhubung ke server',
-          );
-        }
-      }
+      return const KemasanTerpakaiReportResult(
+        success: false,
+        message: 'Gagal terhubung ke server',
+      );
     }
 
     final data = _parseResponse(responseData);
@@ -484,9 +337,7 @@ class ReportService {
 
   // ============================================================
   // GET PAYMENT REPORT — Rekap pembayaran per metode transaksi
-  //
-  // REST API: GET /v1/reports/payments?store_ids=X&start_date=Y-m-d&end_date=Y-m-d
-  // Fallback: POST /penjualan.php (action: getLaporanPembayaran)
+  // RPC: POST /penjualan.php (action: getLaporanPembayaran)
   // ============================================================
   static Future<PaymentReportResult> getPaymentReport({
     String? storeIds,
@@ -504,57 +355,20 @@ class ReportService {
 
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba RESTful API endpoint terlebih dahulu
     try {
-      final response = await dio.get(
-        '/v1/reports/payments',
-        queryParameters: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getLaporanPembayaran',
           'store_ids': targetStoreIds,
           'start_date': startDate,
           'end_date': endDate,
-        },
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback ke endpoint legacy /penjualan.php jika REST belum siap
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: {
-            'action': 'getLaporanPembayaran',
-            'store_ids': targetStoreIds,
-            'start_date': startDate,
-            'end_date': endDate,
-          },
-          options: Options(contentType: Headers.formUrlEncodedContentType),
-        );
-        responseData = response.data;
-      } catch (e) {
-        // Coba lagi dengan FormData jika form-urlencoded gagal
-        try {
-          final response = await dio.post(
-            '/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getLaporanPembayaran',
-              'store_ids': targetStoreIds,
-              'start_date': startDate,
-              'end_date': endDate,
-            }),
-          );
-          responseData = response.data;
-        } catch (_) {
-          return const PaymentReportResult();
-        }
-      }
+      return const PaymentReportResult();
     }
 
     // 3. Parse response data (baik Map maupun String JSON)

@@ -191,6 +191,23 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
     // — inilah salah satu penyebab cart kepotong habis di hp portrait.
     // Sekarang portrait sempit ikut dianggap compact juga.
     final compact = _isCompactHeader || (!_isLandscape && _isTinyTablet);
+
+    final isCash = _isCashCaraBayarId(state.caraBayarID);
+    final isNonCash = state.caraBayarID != 0 && !isCash;
+
+    // Non-cash: nominal selalu mengikuti total (termasuk saat total berubah
+    // karena tambah/hapus item, voucher, ganti channel, dsb).
+    if (isNonCash && state.nominalBayar != state.total) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final s = ref.read(penjualanProvider);
+        if (_isCashCaraBayarId(s.caraBayarID)) return; // keburu pindah ke cash
+        ref.read(penjualanProvider.notifier).setNominalBayar(s.total);
+        _nominalController.text =
+            CurrencyInputFormatter.thousands(s.total.toStringAsFixed(0));
+      });
+    }
+
     final inputDeco = InputDecoration(
       border: const OutlineInputBorder(),
       contentPadding: EdgeInsets.symmetric(
@@ -343,8 +360,12 @@ extension PenjualanSummaryWidgetsX on _PenjualanScreenState {
           // Nominal Bayar
           TextField(
             controller: _nominalController,
+            readOnly: isNonCash, // non-cash: nominal terkunci = total
             keyboardType: TextInputType.number,
-            style: TextStyle(fontSize: _labelFontSize),
+            style: TextStyle(
+              fontSize: _labelFontSize,
+              color: isNonCash ? Colors.grey.shade600 : Colors.black87,
+            ),
             inputFormatters: [
               FilteringTextInputFormatter.digitsOnly,
               CurrencyInputFormatter(),

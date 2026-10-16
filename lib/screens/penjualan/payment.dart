@@ -4,8 +4,19 @@
 part of 'penjualan_screen.dart';
 
 extension PenjualanPaymentX on _PenjualanScreenState {
+  // Cek apakah cara bayar yang dipilih adalah tunai (nama mengandung
+  // cash/tunai). Logikanya sama dengan deteksi di PrinterHelper.
+  bool _isCashCaraBayarId(int id) {
+    final row = _caraBayarList.firstWhere(
+      (c) => int.tryParse(c['dim_carabayar_id'].toString()) == id,
+      orElse: () => {'nama': ''},
+    );
+    final nama = (row['nama'] ?? '').toString().toLowerCase();
+    return nama.contains('cash') || nama.contains('tunai');
+  }
+
   Future<void> _prosesBayar() async {
-    final state = ref.read(penjualanProvider);
+    var state = ref.read(penjualanProvider);
 
     if (state.items.isEmpty) {
       ScaffoldMessenger.of(
@@ -18,6 +29,16 @@ extension PenjualanPaymentX on _PenjualanScreenState {
         context,
       ).showSnackBar(const SnackBar(content: Text('Pilih cara bayar dulu')));
       return;
+    }
+    // Non-cash: nominal bayar SELALU = total (tidak ada kembalian),
+    // supaya nilai payment tidak selisih dengan total.
+    if (!_isCashCaraBayarId(state.caraBayarID) &&
+        state.nominalBayar != state.total) {
+      ref.read(penjualanProvider.notifier).setNominalBayar(state.total);
+      _nominalController.text = CurrencyInputFormatter.thousands(
+        state.total.toStringAsFixed(0),
+      );
+      state = ref.read(penjualanProvider); // baca ulang state terbaru
     }
     if (state.nominalBayar < state.total) {
       ScaffoldMessenger.of(context).showSnackBar(

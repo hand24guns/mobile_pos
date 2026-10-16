@@ -15,39 +15,20 @@ class ProductService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.get('/v1/products', queryParameters: {
-        'term': term,
-        'organisasi_id': organisasiId,
-        'salestipe_id': salesTipeId,
-      });
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'searchProduk',
+          'term': term,
+          'organisasi_id': organisasiId,
+          'salestipe_id': salesTipeId,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'searchProduk',
-            'term': term,
-            'organisasi_id': organisasiId,
-            'salestipe_id': salesTipeId,
-          }),
-        );
-        responseData = res.data;
-      } catch (_) {
-        return [];
-      }
+      return [];
     }
 
     final data = _parseData(responseData);
@@ -63,8 +44,7 @@ class ProductService {
 
   // ============================================================
   // CEK PACKAGE (Cek apakah SKU adalah bundle/package & ambil isian/addon)
-  // REST API: GET /v1/products/{sku}/package?organisasi_id=X&salestipe_id=Y
-  // Fallback: POST /penjualan.php (action: cekPackage)
+  // RPC: POST /penjualan.php (action: cekPackage)
   // ============================================================
   static Future<Map<String, dynamic>> checkPackage({
     required String sku,
@@ -73,39 +53,21 @@ class ProductService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.get('/v1/products/$sku/package', queryParameters: {
-        'organisasi_id': organisasiId,
-        'salestipe_id': salesTipeId,
-      });
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'cekPackage',
+          'sku': sku,
+          'organisasi_id': organisasiId,
+          'salestipe_id': salesTipeId,
+        }),
+        options: Options(responseType: ResponseType.plain),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'cekPackage',
-            'sku': sku,
-            'organisasi_id': organisasiId,
-            'salestipe_id': salesTipeId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = res.data;
-      } catch (_) {
-        return {};
-      }
+      return {};
     }
 
     if (responseData is Map<String, dynamic>) {
@@ -129,8 +91,7 @@ class ProductService {
 
   // ============================================================
   // GET IMAGE PRODUCTS (Daftar produk berkategori dengan gambar untuk grid)
-  // REST API: GET /v1/products/images?organisasi_id=X&salestipe_id=Y
-  // Fallback: POST /penjualan.php (action: getImageProducts)
+  // RPC: POST /penjualan.php (action: getImageProducts)
   // ============================================================
   static Future<dynamic> getImageProducts({
     required int organisasiId,
@@ -138,38 +99,20 @@ class ProductService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.get('/v1/products/images', queryParameters: {
-        'organisasi_id': organisasiId,
-        'salestipe_id': salesTipeId,
-      });
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
-    } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getImageProducts',
-            'organisasi_id': organisasiId,
-            'salestipe_id': salesTipeId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = res.data;
-      } catch (e) {
-        rethrow;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getImageProducts',
+          'organisasi_id': organisasiId,
+          'salestipe_id': salesTipeId,
+        }),
+        options: Options(responseType: ResponseType.plain),
+      );
+      responseData = res.data;
+    } catch (e) {
+      rethrow;
     }
 
     if (responseData is String && responseData.trim().isNotEmpty) {

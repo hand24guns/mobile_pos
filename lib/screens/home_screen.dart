@@ -13,16 +13,44 @@ import 'adjustment_screen.dart';
 import 'laporan_screen.dart';
 import 'pengaturan_screen.dart';
 import 'petikes/petikes_screen.dart';
+import 'transfer_order/transfer_order_screen.dart';
 
 // ─── Palette ────────────────────────────────────────────────
-const Color _navy = Color(0xFF0D1B3E);
-const Color _navyMid = Color(0xFF1A2F5A);
-const Color _navyLight = Color(0xFF243B6E);
-const Color _blue = Color(0xFF2563EB);
+// Warna utama: slate gelap #151F2C. Gradasi dibuat dengan menaikkan
+// lightness secara bertahap di hue yang sama (biru-slate), supaya
+// header dan tile terasa satu keluarga tanpa kontras yang keras.
+const Color _navy = Color(0xFF151F2C); // utama
+const Color _navyMid = Color(0xFF1E2B3D); // tengah gradasi / tooltip
+const Color _navyLight = Color(0xFF2A3A50); // ujung gradasi header
+const Color _navyAccent = Color(0xFF30476A); // ujung gradasi tile menu
+const Color _blue = Color(0xFF2563EB); // aksen / CTA
 const Color _blueLight = Color(0xFF3B82F6);
-const Color _bgGray = Color(0xFFF0F4FA);
-const Color _cardWhite = Colors.white;
+const Color _bgGray = Color(0xFFF2F4F8); // latar halaman, netral-dingin
 const Color _green = Color(0xFF22C55E);
+
+// ─── Model menu (data-driven supaya grid mudah ditambah) ─────
+class _MenuItem {
+  final IconData icon;
+  final String label;
+  final String description;
+  final VoidCallback onTap;
+  final bool enabled;
+
+  const _MenuItem({
+    required this.icon,
+    required this.label,
+    required this.description,
+    required this.onTap,
+    this.enabled = true,
+  });
+}
+
+class _MenuGroup {
+  final String title;
+  final List<_MenuItem> items;
+
+  const _MenuGroup({required this.title, required this.items});
+}
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -54,6 +82,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // dengan path asli menu "Kas Kecil" di sidebar.php / m_menu_pos —
   // nilai di bawah ini masih tebakan mengikuti pola 'folder/Nama'.
   static const String _menuPathKasKecil = 'petikes/Kas';
+
+  // Path menu di m_menu_pos yang mewakili fitur Transfer Order.
+  // NOTE: nilai ini masih tebakan mengikuti pola 'folder/Nama' —
+  // sesuaikan dengan path asli yang didaftarkan di m_menu_pos
+  // (dan dipakai sidebar.php) begitu menu Transfer Order dibuat.
+  static const String _menuPathTransferOrder = 'rolling/TransferOrder';
 
   // ── Tooltip "Ubah Password" di header ─────────────────────
   // LayerLink menghubungkan posisi tooltip (OverlayEntry) dengan
@@ -214,26 +248,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _loadStats();
   }
 
+  // ── Hak akses ────────────────────────────────────────────
   // User tanpa akses store (belum terdaftar di m_user_divisi) tidak
-  // boleh masuk ke Penjualan/Penyesuaian — form-nya akan kosong/rusak
-  // karena tidak ada store yang bisa dipilih. Sebelum session selesai
-  // di-load, anggap dulu enabled (hindari tile kelihatan disabled
-  // sekilas lalu berubah begitu data outlet datang).
+  // boleh masuk ke Penjualan/Penyesuaian/dst — form-nya akan kosong/
+  // rusak karena tidak ada store yang bisa dipilih. Sebelum session
+  // selesai di-load, anggap dulu enabled (hindari tile kelihatan
+  // disabled sekilas lalu berubah begitu data outlet datang).
   bool get _hasStoreAccess => !_sessionLoaded || _outlets.isNotEmpty;
 
-  // Penyesuaian butuh DUA syarat: akses store (sama seperti Penjualan)
-  // DAN akses menu "Penyesuaian" dari grup user (m_user_grup ->
+  // Menu bergrup (Penyesuaian, Kas Kecil, Transfer Order) butuh DUA
+  // syarat: akses store DAN akses menu dari grup user (m_user_grup ->
   // m_grup_menu -> m_menu_pos), sama seperti yang dicek sidebar.php
   // di versi web.
-  bool get _hasAdjustmentAccess =>
-      !_sessionLoaded ||
-      (_outlets.isNotEmpty && _menus.contains(_menuPathAdjustment));
+  bool _hasMenuAccess(String menuPath) =>
+      !_sessionLoaded || (_outlets.isNotEmpty && _menus.contains(menuPath));
 
-  // Kas Kecil butuh syarat yang sama seperti Penyesuaian: akses store
-  // DAN akses menu grup dari m_user_grup -> m_grup_menu -> m_menu_pos.
-  bool get _hasKasKecilAccess =>
-      !_sessionLoaded ||
-      (_outlets.isNotEmpty && _menus.contains(_menuPathKasKecil));
+  bool get _hasAdjustmentAccess => _hasMenuAccess(_menuPathAdjustment);
+  bool get _hasKasKecilAccess => _hasMenuAccess(_menuPathKasKecil);
+  bool get _hasTransferAccess => _hasMenuAccess(_menuPathTransferOrder);
 
   void _showNoStoreAccessWarning() {
     showDialog(
@@ -256,33 +288,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  void _showNoAdjustmentAccessWarning() {
+  // Warning generik untuk menu yang butuh akses store + izin menu grup
+  // (Penyesuaian, Kas Kecil, Transfer Order).
+  void _showNoMenuAccessWarning(String menuName) {
     final reason = _outlets.isEmpty
         ? 'Akun kamu belum memiliki akses ke store manapun.'
-        : 'Akun kamu tidak memiliki izin akses menu Penyesuaian.';
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        icon: const Icon(Icons.lock_outline_rounded, color: _navy, size: 32),
-        title: const Text('Tidak Ada Akses'),
-        content: Text('$reason Silakan hubungi admin untuk mendapatkan akses.'),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(backgroundColor: _navy),
-            child: const Text('OK', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showNoKasKecilAccessWarning() {
-    final reason = _outlets.isEmpty
-        ? 'Akun kamu belum memiliki akses ke store manapun.'
-        : 'Akun kamu tidak memiliki izin akses menu Kas Kecil.';
+        : 'Akun kamu tidak memiliki izin akses menu $menuName.';
 
     showDialog(
       context: context,
@@ -565,6 +576,82 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ============================================================
   // HOME CONTENT
   // ============================================================
+
+  // Daftar menu dikelompokkan per fungsi. Menambah menu baru cukup
+  // menambah _MenuItem di sini — grid yang mengatur kolom & baris.
+  //
+  // PENJUALAN butuh akses store (m_user_divisi). Menu lain yang
+  // bergrup (Penyesuaian, Transfer Order) butuh akses store + izin
+  // menu dari grup user. Kalau tidak punya akses, tile di-disable
+  // (abu-abu + gembok) dan tap menampilkan warning, bukan masuk ke
+  // halaman yang kosong/rusak.
+  List<_MenuGroup> _menuGroups() {
+    return [
+      _MenuGroup(
+        title: 'Transaksi',
+        items: [
+          _MenuItem(
+            icon: Icons.shopping_cart_rounded,
+            label: 'PENJUALAN',
+            description: 'Kasir & transaksi penjualan produk',
+            enabled: _hasStoreAccess,
+            onTap: _hasStoreAccess
+                ? () => _pushAndRecheckPrinter(const PenjualanScreen())
+                : _showNoStoreAccessWarning,
+          ),
+          _MenuItem(
+            icon: Icons.description_rounded,
+            label: 'INVOICE',
+            description: 'Riwayat transaksi & cetak ulang invoice',
+            onTap: () => _pushAndRecheckPrinter(const InvoiceListScreen()),
+          ),
+          _MenuItem(
+            icon: Icons.payments_rounded,
+            label: 'REKAP PEMBAYARAN',
+            description: 'Rekap omset per metode pembayaran',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const LaporanPembayaranScreen(),
+              ),
+            ),
+          ),
+        ],
+      ),
+      _MenuGroup(
+        title: 'Stok dan Gudang',
+        items: [
+          _MenuItem(
+            icon: Icons.inventory_2_rounded,
+            label: 'PENYESUAIAN STOK',
+            description: 'Update selisih & set total stok produk',
+            enabled: _hasAdjustmentAccess,
+            onTap: _hasAdjustmentAccess
+                ? () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AdjustmentScreen(),
+                      ),
+                    )
+                : () => _showNoMenuAccessWarning('Penyesuaian'),
+          ),
+          _MenuItem(
+            icon: Icons.local_shipping_rounded,
+            label: 'TRANSFER ORDER',
+            description: 'Terima barang gudang pusat & ajuan penyesuaian',
+            enabled: _hasTransferAccess,
+            onTap: _hasTransferAccess
+                // Sementara: halaman placeholder "sedang dikembangkan".
+                ? () => _pushAndRecheckPrinter(
+                      TransferOrderScreen(outlets: _outlets),
+                    )
+                : () => _showNoMenuAccessWarning('Transfer Order'),
+          ),
+        ],
+      ),
+    ];
+  }
+
   Widget _buildHomeContent() {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -574,6 +661,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         final hPad = w >= 800 ? 28.0 : 16.0;
         final vPad = compact ? 12.0 : 20.0;
         final gap = compact ? 10.0 : 16.0;
+
+        // Tablet / layar lebar: 3 kolom, tile horizontal (ringkas).
+        // HP / layar sempit: 2 kolom, tile vertikal seperti sebelumnya.
+        final isWide = w >= 600;
+        final columns = isWide ? 3 : 2;
 
         return RefreshIndicator(
           color: _blue,
@@ -588,113 +680,99 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 _buildStatCards(compact: compact, gap: gap, w: w),
                 SizedBox(height: compact ? 12 : 20),
 
-                // ── Menu Utama label ────────────────────────
-                Row(
-                  children: [
-                    Text(
-                      'Menu Utama',
-                      style: TextStyle(
-                        color: _navy,
-                        fontWeight: FontWeight.bold,
-                        fontSize: compact ? 13 : 16,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      width: 28,
-                      height: 3,
-                      decoration: BoxDecoration(
-                        color: _blue,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: compact ? 10 : 14),
-
-                // ── Menu Tiles ──────────────────────────────
-                // Selalu 2 baris x 2 kolom, baik landscape/tablet maupun
-                // portrait/phone: baris atas PENJUALAN + INVOICE,
-                // baris bawah PENYESUAIAN STOK + REKAP PEMBAYARAN.
-                //
-                // PENJUALAN & PENYESUAIAN STOK butuh akses store
-                // (m_user_divisi) — kalau user tidak punya outlet sama
-                // sekali, tile-nya di-disable (abu-abu) dan tap
-                // menampilkan warning, bukan masuk ke form kosong/rusak.
-                Row(
-                  children: [
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.shopping_cart_rounded,
-                        label: 'PENJUALAN',
-                        description: 'Kasir & transaksi penjualan produk',
-                        compact: compact,
-                        enabled: _hasStoreAccess,
-                        onTap: _hasStoreAccess
-                            ? () => _pushAndRecheckPrinter(
-                                  const PenjualanScreen(),
-                                )
-                            : _showNoStoreAccessWarning,
-                      ),
-                    ),
-                    SizedBox(width: gap),
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.description_rounded,
-                        label: 'INVOICE',
-                        description: 'Riwayat transaksi & cetak ulang invoice',
-                        compact: compact,
-                        onTap: () => _pushAndRecheckPrinter(
-                          const InvoiceListScreen(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: gap),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.inventory_2_rounded,
-                        label: 'PENYESUAIAN STOK',
-                        description: 'Update selisih & set total stok produk',
-                        compact: compact,
-                        enabled: _hasAdjustmentAccess,
-                        onTap: _hasAdjustmentAccess
-                            ? () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const AdjustmentScreen(),
-                                  ),
-                                )
-                            : _showNoAdjustmentAccessWarning,
-                      ),
-                    ),
-                    SizedBox(width: gap),
-                    Expanded(
-                      child: _MenuTile(
-                        icon: Icons.payments_rounded,
-                        label: 'REKAP PEMBAYARAN',
-                        description: 'Rekap omset per metode pembayaran',
-                        compact: compact,
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const LaporanPembayaranScreen(),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: compact ? 8 : 20),
+                // ── Grup menu ───────────────────────────────
+                for (final group in _menuGroups()) ...[
+                  _buildGroupTitle(group.title, compact),
+                  SizedBox(height: compact ? 10 : 14),
+                  _buildMenuGrid(
+                    items: group.items,
+                    columns: columns,
+                    horizontal: isWide,
+                    compact: compact,
+                    gap: gap,
+                  ),
+                  SizedBox(height: compact ? 12 : 20),
+                ],
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  Widget _buildGroupTitle(String title, bool compact) {
+    return Row(
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: _navy,
+            fontWeight: FontWeight.bold,
+            fontSize: compact ? 13 : 16,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          width: 28,
+          height: 3,
+          decoration: BoxDecoration(
+            color: _blue,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Grid sederhana berbasis Row: item dipecah per [columns]. Di layar
+  // lebar, sisa slot di baris terakhir diisi ruang kosong supaya lebar
+  // tile tetap 1/columns. Di HP, tile tunggal di baris terakhir
+  // melebar penuh.
+  Widget _buildMenuGrid({
+    required List<_MenuItem> items,
+    required int columns,
+    required bool horizontal,
+    required bool compact,
+    required double gap,
+  }) {
+    final rows = <Widget>[];
+
+    for (var i = 0; i < items.length; i += columns) {
+      final end = (i + columns < items.length) ? i + columns : items.length;
+      final chunk = items.sublist(i, end);
+      final cells = <Widget>[];
+
+      for (var j = 0; j < columns; j++) {
+        final hasItem = j < chunk.length;
+        if (!hasItem && !horizontal) break;
+        if (j > 0) cells.add(SizedBox(width: gap));
+
+        if (hasItem) {
+          final item = chunk[j];
+          cells.add(
+            Expanded(
+              child: _MenuTile(
+                icon: item.icon,
+                label: item.label,
+                description: item.description,
+                compact: compact,
+                horizontal: horizontal,
+                enabled: item.enabled,
+                onTap: item.onTap,
+              ),
+            ),
+          );
+        } else {
+          cells.add(const Expanded(child: SizedBox.shrink()));
+        }
+      }
+
+      if (rows.isNotEmpty) rows.add(SizedBox(height: gap));
+      rows.add(Row(children: cells));
+    }
+
+    return Column(children: rows);
   }
 
   // ── Stat Cards ───────────────────────────────────────────
@@ -823,7 +901,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               enabled: _hasKasKecilAccess,
               onTap: _hasKasKecilAccess
                   ? () => setState(() => _navIndex = 2)
-                  : _showNoKasKecilAccessWarning,
+                  : () => _showNoMenuAccessWarning('Kas Kecil'),
             ),
             _BottomNavItem(
               icon: Icons.settings_rounded,
@@ -990,13 +1068,20 @@ class _MiniStatCard extends StatelessWidget {
 }
 
 // ============================================================
-// WIDGET: _MenuTile  (landscape card, dark navy gradient)
+// WIDGET: _MenuTile
 // ============================================================
+// Dua varian:
+//  - horizontal == true  : kartu ringkas (ikon kiri, teks kanan) untuk
+//                          tablet / layar lebar, tinggi tetap.
+//  - horizontal == false : kartu vertikal dengan tombol CTA untuk HP.
+// Saat enabled == false, tile jadi abu-abu + gembok dan tetap bisa
+// di-tap (onTap dipakai untuk menampilkan warning akses).
 class _MenuTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final String description;
   final bool compact;
+  final bool horizontal;
   final VoidCallback onTap;
   final bool enabled;
 
@@ -1006,11 +1091,133 @@ class _MenuTile extends StatelessWidget {
     required this.description,
     required this.compact,
     required this.onTap,
+    this.horizontal = false,
     this.enabled = true,
   });
 
+  BoxDecoration _decoration(double radius) {
+    return BoxDecoration(
+      gradient: enabled
+          ? const LinearGradient(
+              colors: [_navy, _navyMid, _navyAccent],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            )
+          : LinearGradient(
+              colors: [Colors.grey.shade500, Colors.grey.shade600],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+      borderRadius: BorderRadius.circular(radius),
+      boxShadow: [
+        BoxShadow(
+          color: (enabled ? _navy : Colors.grey).withValues(alpha: 0.3),
+          blurRadius: 10,
+          offset: const Offset(0, 3),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    return horizontal ? _buildHorizontal() : _buildVertical();
+  }
+
+  // ── Varian horizontal (tablet) ───────────────────────────
+  Widget _buildHorizontal() {
+    final iconBox = compact ? 38.0 : 48.0;
+    final pad = compact ? 10.0 : 14.0;
+    final height = compact ? 62.0 : 88.0;
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          height: height,
+          decoration: _decoration(14),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: pad),
+            child: Row(
+              children: [
+                Container(
+                  width: iconBox,
+                  height: iconBox,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: Colors.white,
+                    size: compact ? 20 : 26,
+                  ),
+                ),
+                SizedBox(width: compact ? 10 : 12),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: compact ? 12 : 14,
+                          letterSpacing: 0.3,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (!compact) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          enabled ? description : 'Tidak ada akses',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: compact ? 24 : 28,
+                  height: compact ? 24 : 28,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    enabled
+                        ? Icons.arrow_forward_ios_rounded
+                        : Icons.lock_outline_rounded,
+                    color: Colors.white,
+                    size: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Varian vertikal (HP) ─────────────────────────────────
+  Widget _buildVertical() {
     final iconBox = compact ? 44.0 : 64.0;
     final pad = compact ? 14.0 : 20.0;
 
@@ -1021,27 +1228,7 @@ class _MenuTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Ink(
-          decoration: BoxDecoration(
-            gradient: enabled
-                ? const LinearGradient(
-                    colors: [_navy, _navyMid, Color(0xFF1E3A8A)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  )
-                : LinearGradient(
-                    colors: [Colors.grey.shade500, Colors.grey.shade600],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: (enabled ? _navy : Colors.grey).withValues(alpha: 0.3),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
+          decoration: _decoration(16),
           child: Padding(
             padding: EdgeInsets.all(pad),
             child: Column(

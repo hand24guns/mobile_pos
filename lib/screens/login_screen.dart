@@ -3,6 +3,22 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import 'home_screen.dart';
 
+/// Palet warna login screen (basis: #151F2C)
+class _LoginColors {
+  // Gradient background (gelap -> utama -> sedikit lebih terang)
+  static const Color bgDark = Color(0xFF0B121B);
+  static const Color bgMain = Color(0xFF151F2C);
+  static const Color bgLight = Color(0xFF1F2E42);
+
+  // Surface dialog
+  static const Color surface = Color(0xFF1A2636);
+
+  // Aksen (fokus input, tombol, dekorasi)
+  static const Color accent = Color(0xFF38BDF8);
+  static const Color buttonStart = Color(0xFF2563EB);
+  static const Color buttonEnd = Color(0xFF0EA5E9);
+}
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -73,7 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
         return StatefulBuilder(
           builder: (dialogContext, setDialogState) {
             return AlertDialog(
-              backgroundColor: const Color(0xFF0F1F45),
+              backgroundColor: _LoginColors.surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -185,9 +201,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Color(0xFF081229),
-                  Color(0xFF0F1F45),
-                  Color(0xFF122B63),
+                  _LoginColors.bgDark,
+                  _LoginColors.bgMain,
+                  _LoginColors.bgLight,
                 ],
               ),
             ),
@@ -218,7 +234,7 @@ class _LoginScreenState extends State<LoginScreen> {
               height: 250,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.blue.withValues(alpha: 0.05),
+                color: _LoginColors.accent.withValues(alpha: 0.05),
               ),
             ),
           ),
@@ -294,7 +310,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'v1.5.1',
+                    'v1.6.2',
                     style: TextStyle(
                       color: Colors.white54,
                       fontSize: 13,
@@ -341,7 +357,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'v1.5.1',
+                'v1.6.2',
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 14,
@@ -386,13 +402,13 @@ class _LoginScreenState extends State<LoginScreen> {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(30),
-        color: Colors.white.withValues(alpha: 0.08),
+        color: Colors.white.withValues(alpha: 0.06),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.10),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.30),
+            color: Colors.black.withValues(alpha: 0.35),
             blurRadius: 30,
             offset: const Offset(0, 15),
           ),
@@ -431,6 +447,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 fillColor: Colors.white.withValues(alpha: 0.05),
                 labelText: 'Username',
                 labelStyle: const TextStyle(color: Colors.white70),
+                floatingLabelStyle:
+                    const TextStyle(color: _LoginColors.accent),
                 prefixIcon: const Icon(
                   Icons.person_outline,
                   color: Colors.white70,
@@ -444,7 +462,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: const BorderSide(
-                    color: Color(0xFF60A5FA),
+                    color: _LoginColors.accent,
                     width: 1.5,
                   ),
                 ),
@@ -462,6 +480,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 fillColor: Colors.white.withValues(alpha: 0.05),
                 labelText: 'Password',
                 labelStyle: const TextStyle(color: Colors.white70),
+                floatingLabelStyle:
+                    const TextStyle(color: _LoginColors.accent),
                 prefixIcon: const Icon(
                   Icons.lock_outline,
                   color: Colors.white70,
@@ -486,7 +506,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: const BorderSide(
-                    color: Color(0xFF60A5FA),
+                    color: _LoginColors.accent,
                     width: 1.5,
                   ),
                 ),
@@ -503,8 +523,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     begin: Alignment.centerLeft,
                     end: Alignment.centerRight,
                     colors: [
-                      Color(0xFF1D4ED8),
-                      Color(0xFF4338CA),
+                      _LoginColors.buttonStart,
+                      _LoginColors.buttonEnd,
                     ],
                   ),
                 ),

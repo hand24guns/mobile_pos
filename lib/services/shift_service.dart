@@ -31,8 +31,7 @@ class ShiftResult {
 class ShiftService {
   // ============================================================
   // CEK SHIFT AKTIF
-  // REST API: GET /v1/shifts/check?store_id=X&organisasi_id=Y&user_id=Z
-  // Fallback: POST /penjualan.php (action: cekShift)
+  // RPC: POST /penjualan.php (action: cekShift)
   // ============================================================
   static Future<ShiftResult> cekShift({
     String? token,
@@ -42,37 +41,20 @@ class ShiftService {
   }) async {
     final dio = ApiService.getDio(token: token);
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.get('/v1/shifts/check', queryParameters: {
-        'store_id': storeID,
-        'organisasi_id': organisasiID,
-        'user_id': userID,
-      });
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'cekShift',
+          'store_id': storeID,
+          'organisasi_id': organisasiID,
+          'user_id': userID,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'cekShift',
-              'store_id': storeID,
-              'organisasi_id': organisasiID,
-              'user_id': userID,
-            }));
-        responseData = res.data;
-      } catch (_) {
-        return const ShiftResult(status: ShiftStatus.tidakAda);
-      }
+      return const ShiftResult(status: ShiftStatus.tidakAda);
     }
 
     final data = _parseData(responseData);
@@ -98,8 +80,7 @@ class ShiftService {
 
   // ============================================================
   // BUKA SHIFT
-  // REST API: POST /v1/shifts
-  // Fallback: POST /penjualan.php (action: bukaShift)
+  // RPC: POST /penjualan.php (action: bukaShift)
   // ============================================================
   static Future<int> bukaShift({
     String? token,
@@ -110,39 +91,21 @@ class ShiftService {
   }) async {
     final dio = ApiService.getDio(token: token);
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.post('/v1/shifts', data: {
-        'store_id': storeID,
-        'organisasi_id': organisasiID,
-        'user_id': userID,
-        'modal_kasir': modalKasir,
-      });
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'bukaShift',
+          'store_id': storeID,
+          'organisasi_id': organisasiID,
+          'user_id': userID,
+          'modal_kasir': modalKasir,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'bukaShift',
-              'store_id': storeID,
-              'organisasi_id': organisasiID,
-              'user_id': userID,
-              'modal_kasir': modalKasir,
-            }));
-        responseData = res.data;
-      } catch (_) {
-        return 0;
-      }
+      return 0;
     }
 
     final data = _parseData(responseData);
@@ -157,8 +120,7 @@ class ShiftService {
 
   // ============================================================
   // GET REKAP SHIFT
-  // REST API: GET /v1/shifts/{id}/summary
-  // Fallback: POST /penjualan.php (action: getRekapShift)
+  // RPC: POST /penjualan.php (action: getRekapShift)
   // ============================================================
   static Future<Map<String, dynamic>> getRekapShift({
     String? token,
@@ -168,36 +130,20 @@ class ShiftService {
   }) async {
     final dio = ApiService.getDio(token: token);
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.get('/v1/shifts/$shiftID/summary', queryParameters: {
-        'store_id': storeID,
-        'organisasi_id': organisasiID,
-      });
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getRekapShift',
+          'shift_id': shiftID,
+          'store_id': storeID,
+          'organisasi_id': organisasiID,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getRekapShift',
-              'shift_id': shiftID,
-              'store_id': storeID,
-              'organisasi_id': organisasiID,
-            }));
-        responseData = res.data;
-      } catch (_) {
-        return {};
-      }
+      return {};
     }
 
     final data = _parseData(responseData);
@@ -217,8 +163,7 @@ class ShiftService {
 
   // ============================================================
   // TUTUP SHIFT
-  // REST API: POST /v1/shifts/{id}/close
-  // Fallback: POST /penjualan.php (action: tutupShift)
+  // RPC: POST /penjualan.php (action: tutupShift)
   // ============================================================
   static Future<bool> tutupShift({
     String? token,
@@ -230,40 +175,22 @@ class ShiftService {
   }) async {
     final dio = ApiService.getDio(token: token);
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final res = await dio.post('/v1/shifts/$shiftID/close', data: {
-        'store_id': storeID,
-        'organisasi_id': organisasiID,
-        'total_sales': totalSales,
-        'jumlah_invoice': jumlahInvoice,
-      });
-      if (res.statusCode == 200 || res.statusCode == 204) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'tutupShift',
+          'shift_id': shiftID,
+          'store_id': storeID,
+          'organisasi_id': organisasiID,
+          'total_sales': totalSales,
+          'jumlah_invoice': jumlahInvoice,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post('/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'tutupShift',
-              'shift_id': shiftID,
-              'store_id': storeID,
-              'organisasi_id': organisasiID,
-              'total_sales': totalSales,
-              'jumlah_invoice': jumlahInvoice,
-            }));
-        responseData = res.data;
-      } catch (_) {
-        return false;
-      }
+      return false;
     }
 
     final data = _parseData(responseData);
@@ -272,42 +199,23 @@ class ShiftService {
 
   // ============================================================
   // CEK SHIFT USER — Cek apakah user memiliki shift aktif di store manapun
-  //
-  // REST API: GET /v1/shifts/active?user_id=X
-  // Fallback: POST /penjualan.php (action: cekShiftUser)
+  // RPC: POST /penjualan.php (action: cekShiftUser)
   // ============================================================
   static Future<Map<String, dynamic>> cekShiftUser({int? userId}) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. REST API
     try {
-      final res = await dio.get('/v1/shifts/active', queryParameters: {
-        if (userId != null && userId > 0) 'user_id': userId,
-      });
-      if (res.statusCode == 200 && res.data != null) {
-        responseData = res.data;
-        restSuccess = true;
-      }
+      final res = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'cekShiftUser',
+          if (userId != null && userId > 0) 'user_id': userId,
+        }),
+      );
+      responseData = res.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback
-    if (!restSuccess || responseData == null) {
-      try {
-        final res = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'cekShiftUser',
-            if (userId != null && userId > 0) 'user_id': userId,
-          }),
-        );
-        responseData = res.data;
-      } catch (_) {
-        return {'has_shift': false};
-      }
+      return {'has_shift': false};
     }
 
     Map<String, dynamic> data = {};

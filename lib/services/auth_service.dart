@@ -4,55 +4,20 @@ import 'session_service.dart';
 
 class AuthService {
   // ============================================================
-  // LOGIN — kirim kredensial ke RESTful endpoint /v1/auth/login,
-  // simpan session jika sukses.
-  // Format body: JSON (application/json) {'username': ..., 'password': ...}
-  //
-  // Mendukung standard response REST API:
-  // {
-  //   "success": true,
-  //   "message": "Login berhasil",
-  //   "data": {
-  //     "token": "...",
-  //     "user_id": 1,
-  //     "nama": "Kasir 1",
-  //     "username": "kasir1",
-  //     "outlets": [1, 2],
-  //     "menus": [...]
-  //   }
-  // }
+  // LOGIN — kirim kredensial ke RPC /auth.php
   // ============================================================
   static Future<Map<String, dynamic>> login(
       String username, String password) async {
     try {
       final dio = ApiService.getDio();
-      Response response;
-      try {
-        // Panggilan RESTful API standar: POST /v1/auth/login dengan body JSON
-        response = await dio.post(
-          '/v1/auth/login',
-          data: {
-            'username': username,
-            'password': password,
-          },
-        );
-      } on DioException catch (dioErr) {
-        final is404 = dioErr.response?.statusCode == 404;
-        final isBlockedOrOffline =
-            dioErr.type == DioExceptionType.connectionError;
-        if (is404 || isBlockedOrOffline) {
-          response = await dio.post(
-            '/auth.php',
-            data: FormData.fromMap({
-              'action': 'login',
-              'username': username,
-              'password': password,
-            }),
-          );
-        } else {
-          rethrow;
-        }
-      }
+      final response = await dio.post(
+        '/auth.php',
+        data: FormData.fromMap({
+          'action': 'login',
+          'username': username,
+          'password': password,
+        }),
+      );
 
       final dynamic rawData = response.data;
       final Map<String, dynamic> responseData =
@@ -61,8 +26,6 @@ class AuthService {
       final bool isSuccess = responseData['success'] == true;
 
       if (isSuccess) {
-        // Mengambil payload baik dari format REST ('data': { ... })
-        // maupun format flat/legacy di root responseData
         final payload = (responseData['data'] is Map<String, dynamic>)
             ? responseData['data'] as Map<String, dynamic>
             : responseData;
@@ -133,7 +96,6 @@ class AuthService {
 
       return responseData;
     } on DioException catch (e) {
-      // Menangkap pesan eror yang dikirim oleh backend PHP (seperti status 401/400)
       if (e.response != null && e.response?.data is Map<String, dynamic>) {
         return e.response!.data as Map<String, dynamic>;
       }
@@ -147,24 +109,14 @@ class AuthService {
   }
 
   // ============================================================
-  // LOGOUT — panggil endpoint logout REST (opsional) & hapus sesi lokal
+  // LOGOUT — hapus sesi lokal
   // ============================================================
   static Future<void> logout() async {
-    try {
-      final dio = ApiService.getDio();
-      await dio.post('/v1/auth/logout');
-    } catch (_) {
-      // Abaikan kegagalan jaringan saat logout agar sesi lokal tetap bersih
-    } finally {
-      await SessionService.clearSession();
-    }
+    await SessionService.clearSession();
   }
 
   // ============================================================
-  // CHANGE PASSWORD — ubah password kasir / user yang sedang login
-  //
-  // REST API: POST /v1/auth/change-password
-  // Body JSON: {"password": ..., "password_confirmation": ...}
+  // CHANGE PASSWORD — ubah password kasir / user yang sedang login via RPC
   // ============================================================
   static Future<Map<String, dynamic>> changePassword({
     required String password,
@@ -172,34 +124,14 @@ class AuthService {
   }) async {
     try {
       final dio = ApiService.getDio();
-
-      Response response;
-      try {
-        // Panggilan RESTful standar: POST /v1/auth/change-password
-        response = await dio.post(
-          '/v1/auth/change-password',
-          data: {
-            'password': password,
-            'password_confirmation': passwordConfirmation,
-          },
-        );
-      } on DioException catch (dioErr) {
-        final is404 = dioErr.response?.statusCode == 404;
-        final isBlockedOrOffline =
-            dioErr.type == DioExceptionType.connectionError;
-        if (is404 || isBlockedOrOffline) {
-          response = await dio.post(
-            '/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'changePassword',
-              'password': password,
-              'password_confirmation': passwordConfirmation,
-            }),
-          );
-        } else {
-          rethrow;
-        }
-      }
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'changePassword',
+          'password': password,
+          'password_confirmation': passwordConfirmation,
+        }),
+      );
 
       final dynamic rawData = response.data;
       final Map<String, dynamic> responseData =

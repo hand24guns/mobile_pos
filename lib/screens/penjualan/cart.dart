@@ -70,6 +70,8 @@ extension PenjualanCartX on _PenjualanScreenState {
 
     await CartService.updateItemNotes(
       itemId: item.id,
+      number: state.number,
+      deviceToken: _deviceToken,
       keterangan: keterangan,
     );
 
@@ -206,6 +208,7 @@ extension PenjualanCartX on _PenjualanScreenState {
         storeId: state.storeID,
         organisasiId: state.organisasiID,
         deviceToken: _deviceToken,
+        memberId: state.memberID ?? 0,
       );
 
       if (res['success'] == true) {
@@ -508,6 +511,7 @@ extension PenjualanCartX on _PenjualanScreenState {
         number: state.number,
         deviceToken: _deviceToken,
         isFree: isFree,
+        reason: reason,
       );
 
       if (resMap['success'] == true) {
@@ -854,6 +858,11 @@ extension PenjualanCartX on _PenjualanScreenState {
         storeId: state.storeID,
         deviceToken: _deviceToken,
         salesTipeId: state.salesTipeID,
+        qty: qty,
+        isFree: isFree,
+        reason: reason,
+        memberId: state.memberID ?? 0,
+        voucher: _activeVoucher,
       );
 
       if (res['success'] == true) {

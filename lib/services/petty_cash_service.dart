@@ -5,9 +5,7 @@ import 'api_service.dart';
 class PettyCashService {
   // ============================================================
   // GET NOMOR DOKUMEN KAS KECIL
-  //
-  // REST API: GET /v1/petty-cash/number?tipe=masuk|keluar&organisasi_id=X
-  // Fallback: POST /penjualan.php (action: getNumberPetikes)
+  // RPC: POST /penjualan.php (action: getNumberPetikes)
   // ============================================================
   static Future<String?> getPettyCashNumber({
     required String tipe,
@@ -15,40 +13,19 @@ class PettyCashService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/petty-cash/number',
-        queryParameters: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getNumberPetikes',
           'tipe': tipe,
           'organisasi_id': organisasiId,
-        },
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getNumberPetikes',
-            'tipe': tipe,
-            'organisasi_id': organisasiId,
-          }),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return null;
-      }
+      return null;
     }
 
     final data = _parseResponse(responseData);
@@ -60,45 +37,25 @@ class PettyCashService {
 
   // ============================================================
   // GET KATEGORI OPEX
-  //
-  // REST API: GET /v1/petty-cash/categories?organisasi_id=X
-  // Fallback: POST /penjualan.php (action: getOpexPetikes)
+  // RPC: POST /penjualan.php (action: getOpexPetikes)
   // ============================================================
   static Future<List<Map<String, dynamic>>> getOpexCategories({
     required int organisasiId,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/petty-cash/categories',
-        queryParameters: {'organisasi_id': organisasiId},
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getOpexPetikes',
+          'organisasi_id': organisasiId,
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getOpexPetikes',
-            'organisasi_id': organisasiId,
-          }),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return [];
-      }
+      return [];
     }
 
     final data = _parseResponse(responseData);
@@ -113,9 +70,7 @@ class PettyCashService {
 
   // ============================================================
   // GET MUTASI KAS KECIL
-  //
-  // REST API: GET /v1/petty-cash?store_id=X&organisasi_id=Y&start_date=Z&end_date=W
-  // Fallback: POST /penjualan.php (action: getPetikesList)
+  // RPC: POST /penjualan.php (action: getPetikesList)
   // ============================================================
   static Future<Map<String, dynamic>> getPettyCashList({
     required int storeId,
@@ -125,49 +80,26 @@ class PettyCashService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/petty-cash',
-        queryParameters: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getPetikesList',
           'store_id': storeId,
           'organisasi_id': organisasiId,
           'start_date': startDate,
           'end_date': endDate,
-        },
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getPetikesList',
-            'store_id': storeId,
-            'organisasi_id': organisasiId,
-            'start_date': startDate,
-            'end_date': endDate,
-          }),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return {
-          'success': false,
-          'message': 'Gagal terhubung ke server',
-          'data': <Map<String, dynamic>>[],
-          'saldo_total': 0.0,
-        };
-      }
+      return {
+        'success': false,
+        'message': 'Gagal terhubung ke server',
+        'data': <Map<String, dynamic>>[],
+        'saldo_total': 0.0,
+      };
     }
 
     final data = _parseResponse(responseData);
@@ -206,42 +138,25 @@ class PettyCashService {
 
   // ============================================================
   // GET DETAIL JURNAL & FOTO NOTA KAS KECIL
-  //
-  // REST API: GET /v1/petty-cash/{payment_id}/journal
-  // Fallback: POST /penjualan.php (action: getJurnal)
+  // RPC: POST /penjualan.php (action: getJurnal)
   // ============================================================
   static Future<Map<String, dynamic>> getJournalDetail({
     required int paymentId,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get('/v1/petty-cash/$paymentId/journal');
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getJurnal',
+          'payment_id': paymentId,
+        }),
+      );
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getJurnal',
-            'payment_id': paymentId,
-          }),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal terhubung ke server'};
-      }
+      return {'success': false, 'message': 'Gagal terhubung ke server'};
     }
 
     final data = _parseResponse(responseData);
@@ -285,42 +200,25 @@ class PettyCashService {
 
   // ============================================================
   // VOID TRANSAKSI KAS KECIL
-  //
-  // REST API: POST /v1/petty-cash/{payment_id}/void
-  // Fallback: POST /penjualan.php (action: voidPetikes)
+  // RPC: POST /penjualan.php (action: voidPetikes)
   // ============================================================
   static Future<Map<String, dynamic>> voidPettyCash({
     required int paymentId,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.post('/v1/petty-cash/$paymentId/void');
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'voidPetikes',
+          'payment_id': paymentId,
+        }),
+      );
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'voidPetikes',
-            'payment_id': paymentId,
-          }),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal terhubung ke server'};
-      }
+      return {'success': false, 'message': 'Gagal terhubung ke server'};
     }
 
     final data = _parseResponse(responseData);
@@ -337,9 +235,7 @@ class PettyCashService {
 
   // ============================================================
   // SUBMIT TRANSAKSI KAS KECIL (DENGAN UPLOAD FOTO)
-  //
-  // REST API: POST /v1/petty-cash
-  // Fallback: POST /penjualan.php (action: simpanPetikes)
+  // RPC: POST /penjualan.php (action: simpanPetikes)
   // ============================================================
   static Future<Map<String, dynamic>> submitPettyCash({
     required int storeId,
@@ -355,11 +251,10 @@ class PettyCashService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    Future<FormData> buildFormData({bool isLegacy = false}) async {
+    Future<FormData> buildFormData() async {
       final formMap = <String, dynamic>{
-        if (isLegacy) 'action': 'simpanPetikes',
+        'action': 'simpanPetikes',
         'store_id': storeId,
         'organisasi_id': organisasiId,
         'tipe': tipe,
@@ -390,33 +285,15 @@ class PettyCashService {
       return formData;
     }
 
-    // 1. Coba REST API
     try {
-      final formData = await buildFormData(isLegacy: false);
+      final formData = await buildFormData();
       final response = await dio.post(
-        '/v1/petty-cash',
+        '/penjualan.php',
         data: formData,
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final legacyFormData = await buildFormData(isLegacy: true);
-        final response = await dio.post(
-          '/penjualan.php',
-          data: legacyFormData,
-        );
-        responseData = response.data;
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal terhubung ke server'};
-      }
+      return {'success': false, 'message': 'Gagal terhubung ke server'};
     }
 
     final data = _parseResponse(responseData);

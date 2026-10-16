@@ -62,55 +62,17 @@ class DashboardService {
     final storeIdsStr = effectiveStoreIds.join(',');
 
     dynamic responseData;
-    bool restSuccess = false;
-
-    // 1. Coba RESTful API endpoint terlebih dahulu
     try {
-      final response = await dio.get(
-        '/v1/dashboard',
-        queryParameters: {
-          if (storeIdsStr.isNotEmpty) 'store_ids': storeIdsStr,
-        },
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getDashboard',
+          'store_ids': storeIdsStr,
+        }),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      // Endpoint REST v1 belum dideploy di backend (mengembalikan 404, 405 Method Not Allowed, dll)
-      restSuccess = false;
-    }
-
-    // 2. Fallback ke endpoint legacy /penjualan.php jika REST belum siap
-    if (!restSuccess || responseData == null) {
-      try {
-        // Menggunakan formUrlEncodedContentType agar identik dengan pemanggilan http.post sebelumnya
-        final response = await dio.post(
-          '/penjualan.php',
-          data: {
-            'action': 'getDashboard',
-            'store_ids': storeIdsStr,
-          },
-          options: Options(
-            contentType: Headers.formUrlEncodedContentType,
-          ),
-        );
-        responseData = response.data;
-      } catch (e) {
-        // Coba lagi dengan FormData jika form-urlencoded gagal
-        try {
-          final response = await dio.post(
-            '/penjualan.php',
-            data: FormData.fromMap({
-              'action': 'getDashboard',
-              'store_ids': storeIdsStr,
-            }),
-          );
-          responseData = response.data;
-        } catch (_) {
-          return DashboardStats(storeIds: effectiveStoreIds);
-        }
-      }
+      return DashboardStats(storeIds: effectiveStoreIds);
     }
 
     // 3. Parse response data (baik Map maupun String JSON)

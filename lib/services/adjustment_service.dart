@@ -5,44 +5,24 @@ import 'api_service.dart';
 class AdjustmentService {
   // ============================================================
   // GET NOMOR DOKUMEN ADJUSTMENT
-  //
-  // REST API: GET /v1/adjustments/number?store_id=X
-  // Fallback: POST /penjualan.php (action: getNumberAdjustment)
+  // RPC: POST /penjualan.php (action: getNumberAdjustment)
   // ============================================================
   static Future<String?> getAdjustmentNumber(int storeId) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/adjustments/number',
-        queryParameters: {'store_id': storeId},
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getNumberAdjustment',
+          'store_id': storeId,
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getNumberAdjustment',
-            'store_id': storeId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return null;
-      }
+      return null;
     }
 
     final data = _parseResponse(responseData);
@@ -54,9 +34,7 @@ class AdjustmentService {
 
   // ============================================================
   // SEARCH PRODUK ADJUSTMENT
-  //
-  // REST API: GET /v1/adjustments/products/search?organisasi_id=X&term=Y
-  // Fallback: POST /penjualan.php (action: searchProdukAdjustment)
+  // RPC: POST /penjualan.php (action: searchProdukAdjustment)
   // ============================================================
   static Future<List<Map<String, dynamic>>> searchProducts({
     required int organisasiId,
@@ -64,41 +42,20 @@ class AdjustmentService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/adjustments/products/search',
-        queryParameters: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'searchProdukAdjustment',
           'organisasi_id': organisasiId,
           'term': term,
-        },
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'searchProdukAdjustment',
-            'organisasi_id': organisasiId,
-            'term': term,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return [];
-      }
+      return [];
     }
 
     final data = _parseResponse(responseData);
@@ -113,46 +70,26 @@ class AdjustmentService {
 
   // ============================================================
   // GET PRODUK DENGAN IMAGE (GRID ADJUSTMENT)
-  //
-  // REST API: GET /v1/adjustments/products/images?organisasi_id=X
-  // Fallback: POST /penjualan.php (action: getImageProductsAdjustment)
+  // RPC: POST /penjualan.php (action: getImageProductsAdjustment)
   // ============================================================
   static Future<List<Map<String, dynamic>>> getImageProducts({
     required int organisasiId,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/adjustments/products/images',
-        queryParameters: {'organisasi_id': organisasiId},
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getImageProductsAdjustment',
+          'organisasi_id': organisasiId,
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getImageProductsAdjustment',
-            'organisasi_id': organisasiId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return [];
-      }
+      return [];
     }
 
     final data = _parseResponse(responseData);
@@ -181,9 +118,7 @@ class AdjustmentService {
 
   // ============================================================
   // INSERT ITEM ADJUSTMENT (TEMP)
-  //
-  // REST API: POST /v1/adjustments/items
-  // Fallback: POST /penjualan.php (action: insertItemAdjustment)
+  // RPC: POST /penjualan.php (action: insertItemAdjustment)
   // ============================================================
   static Future<Map<String, dynamic>> insertItem({
     required String number,
@@ -193,45 +128,22 @@ class AdjustmentService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
       final response = await dio.post(
-        '/v1/adjustments/items',
-        data: {
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'insertItemAdjustment',
           'number': number,
           'kode': kode,
           'qty': qty,
           'organisasi_id': organisasiId,
-        },
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'insertItemAdjustment',
-            'number': number,
-            'kode': kode,
-            'qty': qty,
-            'organisasi_id': organisasiId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal terhubung ke server'};
-      }
+      return {'success': false, 'message': 'Gagal terhubung ke server'};
     }
 
     final data = _parseResponse(responseData);
@@ -247,9 +159,7 @@ class AdjustmentService {
 
   // ============================================================
   // GET ITEMS ADJUSTMENT (TEMP)
-  //
-  // REST API: GET /v1/adjustments/items?number=X&organisasi_id=Y
-  // Fallback: POST /penjualan.php (action: getListAdjustment)
+  // RPC: POST /penjualan.php (action: getListAdjustment)
   // ============================================================
   static Future<List<Map<String, dynamic>>> getItems({
     required String number,
@@ -259,41 +169,20 @@ class AdjustmentService {
 
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/adjustments/items',
-        queryParameters: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getListAdjustment',
           'number': number,
           'organisasi_id': organisasiId,
-        },
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getListAdjustment',
-            'number': number,
-            'organisasi_id': organisasiId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return [];
-      }
+      return [];
     }
 
     final data = _parseResponse(responseData);
@@ -308,9 +197,7 @@ class AdjustmentService {
 
   // ============================================================
   // GET TOTAL QTY ADJUSTMENT (TEMP)
-  //
-  // REST API: GET /v1/adjustments/total-qty?number=X&organisasi_id=Y
-  // Fallback: POST /penjualan.php (action: getTotalQtyAdjustment)
+  // RPC: POST /penjualan.php (action: getTotalQtyAdjustment)
   // ============================================================
   static Future<int> getTotalQty({
     required String number,
@@ -320,41 +207,20 @@ class AdjustmentService {
 
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.get(
-        '/v1/adjustments/total-qty',
-        queryParameters: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getTotalQtyAdjustment',
           'number': number,
           'organisasi_id': organisasiId,
-        },
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'getTotalQtyAdjustment',
-            'number': number,
-            'organisasi_id': organisasiId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return 0;
-      }
+      return 0;
     }
 
     final data = _parseResponse(responseData);
@@ -366,9 +232,7 @@ class AdjustmentService {
 
   // ============================================================
   // UPDATE QTY ITEM
-  //
-  // REST API: PUT /v1/adjustments/items
-  // Fallback: POST /penjualan.php (action: updateQtyAdjustment)
+  // RPC: POST /penjualan.php (action: updateQtyAdjustment)
   // ============================================================
   static Future<bool> updateQty({
     required String number,
@@ -377,43 +241,21 @@ class AdjustmentService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.put(
-        '/v1/adjustments/items',
-        data: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'updateQtyAdjustment',
           'number': number,
           'kode': kode,
           'qty': qty,
-        },
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'updateQtyAdjustment',
-            'number': number,
-            'kode': kode,
-            'qty': qty,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return false;
-      }
+      return false;
     }
 
     final data = _parseResponse(responseData);
@@ -422,9 +264,7 @@ class AdjustmentService {
 
   // ============================================================
   // DELETE ITEM ADJUSTMENT
-  //
-  // REST API: DELETE /v1/adjustments/items
-  // Fallback: POST /penjualan.php (action: deleteItemAdjustment)
+  // RPC: POST /penjualan.php (action: deleteItemAdjustment)
   // ============================================================
   static Future<bool> deleteItem({
     required String number,
@@ -433,43 +273,21 @@ class AdjustmentService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
-      final response = await dio.delete(
-        '/v1/adjustments/items',
-        data: {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'deleteItemAdjustment',
           'number': number,
           'kode': kode,
           'organisasi_id': organisasiId,
-        },
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'deleteItemAdjustment',
-            'number': number,
-            'kode': kode,
-            'organisasi_id': organisasiId,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return false;
-      }
+      return false;
     }
 
     final data = _parseResponse(responseData);
@@ -478,9 +296,7 @@ class AdjustmentService {
 
   // ============================================================
   // SIMPAN TRANSAKSI ADJUSTMENT
-  //
-  // REST API: POST /v1/adjustments
-  // Fallback: POST /penjualan.php (action: simpanAdjustment)
+  // RPC: POST /penjualan.php (action: simpanAdjustment)
   // ============================================================
   static Future<Map<String, dynamic>> submitAdjustment({
     required int storeId,
@@ -491,47 +307,23 @@ class AdjustmentService {
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
-    bool restSuccess = false;
 
-    // 1. Coba REST API
     try {
       final response = await dio.post(
-        '/v1/adjustments',
-        data: {
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'simpanAdjustment',
           'store_id': storeId,
           'organisasi_id': organisasiId,
           'tanggal': tanggal,
           'number': number,
           'tipe': tipe,
-        },
+        }),
+        options: Options(responseType: ResponseType.plain),
       );
-      if (response.statusCode == 200 && response.data != null) {
-        responseData = response.data;
-        restSuccess = true;
-      }
+      responseData = response.data;
     } catch (_) {
-      restSuccess = false;
-    }
-
-    // 2. Fallback legacy /penjualan.php
-    if (!restSuccess || responseData == null) {
-      try {
-        final response = await dio.post(
-          '/penjualan.php',
-          data: FormData.fromMap({
-            'action': 'simpanAdjustment',
-            'store_id': storeId,
-            'organisasi_id': organisasiId,
-            'tanggal': tanggal,
-            'number': number,
-            'tipe': tipe,
-          }),
-          options: Options(responseType: ResponseType.plain),
-        );
-        responseData = response.data;
-      } catch (_) {
-        return {'success': false, 'message': 'Gagal terhubung ke server'};
-      }
+      return {'success': false, 'message': 'Gagal terhubung ke server'};
     }
 
     final data = _parseResponse(responseData);

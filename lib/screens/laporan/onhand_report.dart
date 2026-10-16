@@ -76,10 +76,12 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
 
       if (!mounted) return;
       setState(() {
-        _stores = stores.map((m) => {
-          'id': m['id'] ?? m['dim_divisi_id'] ?? m['store_id'],
-          'nama': m['nama'] ?? m['store_name'] ?? m['name'],
-        }).toList();
+        _stores = stores
+            .map((m) => {
+                  'id': m['id'] ?? m['dim_divisi_id'] ?? m['store_id'],
+                  'nama': m['nama'] ?? m['store_name'] ?? m['name'],
+                })
+            .toList();
       });
     } catch (_) {
       // Gagal ambil nama store — dropdown fallback tampilkan ID saja.
@@ -535,9 +537,12 @@ class _OnhandReportScreenState extends State<OnhandReportScreen> {
   }
 
   Widget _buildRowCard(Map<String, dynamic> item, int i, bool compact) {
+    final warna = (item['warna'] ?? '').toString().trim();
+    final warnaTampil = warna.toUpperCase() == 'NONE' ? '' : warna;
+
     final namaGabungan = [
       item['nama'],
-      item['warna'],
+      warnaTampil,
       item['size'],
     ].where((e) => (e ?? '').toString().isNotEmpty).join(' - ');
     final kode = '${item['kode'] ?? ''}';
