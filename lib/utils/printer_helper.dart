@@ -554,7 +554,8 @@ class PrinterHelper {
     // Format: baris pertama  "1 x Nama Awal"
     //         baris lanjutan "    Nama Lanjutan"
     const int kitchenLineWidth = 32; // char per baris untuk normal size
-    for (var item in items) {
+    for (int idx = 0; idx < items.length; idx++) {
+      final item = items[idx];
       final qty = item['qty'];
       final nama = _sanitizeForPrint(item['nama'] as String);
 
@@ -567,7 +568,11 @@ class PrinterHelper {
         final lineText = (i == 0 ? prefix : prefixBlank) + namaLines[i];
         bytes += generator.text(
           lineText,
-          styles: const PosStyles(bold: true),
+          styles: const PosStyles(
+            bold: true,
+            height: PosTextSize.size2,
+            width: PosTextSize.size1,
+          ),
         );
       }
 
@@ -598,8 +603,16 @@ class PrinterHelper {
       if (itemKet.isNotEmpty) {
         bytes += generator.text('  >> Note: $itemKet');
       }
+
+      // ── Pemisah antar item (garis hr + jarak baris kosong) ──
+      if (idx < items.length - 1) {
+        bytes += generator.emptyLines(1);
+        bytes += generator.hr();
+        bytes += generator.emptyLines(1);
+      }
     }
 
+    bytes += generator.emptyLines(1);
     bytes += generator.hr();
 
     // ── Catatan order keseluruhan ────────────────────────────────
