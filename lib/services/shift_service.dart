@@ -12,6 +12,9 @@ enum ShiftStatus {
 
   /// Shift aktif tapi milik user lain → blokir
   milikOrangLain,
+
+  /// Gagal terhubung ke server (offline, timeout, dsb)
+  error,
 }
 
 class ShiftResult {
@@ -54,27 +57,37 @@ class ShiftService {
       );
       responseData = res.data;
     } catch (_) {
-      return const ShiftResult(status: ShiftStatus.tidakAda);
+      return const ShiftResult(status: ShiftStatus.error);
     }
 
     final data = _parseData(responseData);
-    final int statusCode = data['status'] ?? 0;
+    if (data.isEmpty ||
+        (data['success'] != true &&
+            data['success'] != 1 &&
+            data['success'] != 'true')) {
+      return const ShiftResult(status: ShiftStatus.error);
+    }
+
+    final int statusCode =
+        int.tryParse(data['status']?.toString() ?? '') ?? -1;
 
     switch (statusCode) {
       case 1:
         return ShiftResult(
           status: ShiftStatus.milikSaya,
-          shiftID: data['shift_id'] ?? 0,
+          shiftID: int.tryParse(data['shift_id']?.toString() ?? '') ?? 0,
           modalKasir: (data['modal_kasir'] as num?)?.toDouble() ?? 0,
         );
       case 2:
         return ShiftResult(
           status: ShiftStatus.milikOrangLain,
-          shiftID: data['shift_id'] ?? 0,
-          kasirNama: data['kasir_nama'] ?? 'User lain',
+          shiftID: int.tryParse(data['shift_id']?.toString() ?? '') ?? 0,
+          kasirNama: data['kasir_nama']?.toString() ?? 'User lain',
         );
-      default:
+      case 0:
         return const ShiftResult(status: ShiftStatus.tidakAda);
+      default:
+        return const ShiftResult(status: ShiftStatus.error);
     }
   }
 

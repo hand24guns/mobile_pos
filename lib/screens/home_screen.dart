@@ -14,6 +14,7 @@ import 'laporan_screen.dart';
 import 'pengaturan_screen.dart';
 import 'petikes/petikes_screen.dart';
 import 'transfer_order/transfer_order_screen.dart';
+import '../services/transfer_order_service.dart';
 
 // ─── Palette ────────────────────────────────────────────────
 // Warna utama: slate gelap #151F2C. Gradasi dibuat dengan menaikkan
@@ -35,6 +36,7 @@ class _MenuItem {
   final String description;
   final VoidCallback onTap;
   final bool enabled;
+  final int badgeCount;
 
   const _MenuItem({
     required this.icon,
@@ -42,6 +44,7 @@ class _MenuItem {
     required this.description,
     required this.onTap,
     this.enabled = true,
+    this.badgeCount = 0,
   });
 }
 
@@ -71,23 +74,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _isLoading = false;
   List<int> _outlets = [];
   List<String> _menus = [];
+  List<String> _editable = []; // path menu detail yang user punya is_edit=1
   bool _sessionLoaded = false;
 
-  // Path menu di m_menu_pos yang mewakili fitur Penyesuaian (sama
-  // dengan path yang dipakai sidebar.php versi web).
+  // Perpindahan Stok (Transfer Order) alert & badge
+  int _pendingTransferCount = 0;
+  String _firstPendingKode = '';
+  String _firstPendingPengirim = '';
+  bool _alertDismissed = false;
+
+  // ── Path menu (sesuai kolom `path` di m_menu_pos / m_menu_detail_pos
+  //    dan kolom `link` di m_submenu) ─────────────────────────────────
+  //
+  // Penjualan → m_menu_pos.path = 'Penjualan'
+  static const String _menuPathPenjualan = 'Penjualan';
+  // Penyesuaian Stok → m_menu_pos.path = 'penyesuaian/Adjustment'
   static const String _menuPathAdjustment = 'penyesuaian/Adjustment';
-
-  // Path menu di m_menu_pos yang mewakili fitur Kas Kecil, sama pola
-  // dengan _menuPathAdjustment di atas. NOTE: sesuaikan string ini
-  // dengan path asli menu "Kas Kecil" di sidebar.php / m_menu_pos —
-  // nilai di bawah ini masih tebakan mengikuti pola 'folder/Nama'.
+  // Kas Kecil → m_menu_pos.path = 'petikes/Kas'
   static const String _menuPathKasKecil = 'petikes/Kas';
-
-  // Path menu di m_menu_pos yang mewakili fitur Transfer Order.
-  // NOTE: nilai ini masih tebakan mengikuti pola 'folder/Nama' —
-  // sesuaikan dengan path asli yang didaftarkan di m_menu_pos
-  // (dan dipakai sidebar.php) begitu menu Transfer Order dibuat.
+  // Mutasi Barang (Perpindahan Item) → m_menu_pos.path = 'rolling/TransferOrder'
   static const String _menuPathTransferOrder = 'rolling/TransferOrder';
+  // Invoice List → m_submenu.link = 'PenjualanList' (tab Laporan - Penjualan)
+  static const String _menuPathInvoice = 'PenjualanList';
+  // Rekap Pembayaran → m_submenu.link = 'Pembayaran' (tab Laporan - Pembayaran - Cara Bayar)
+  static const String _menuPathRekapBayar = 'Pembayaran';
+  // Laporan (bottom nav) → m_menu_detail_pos.path = 'report/PenjualanDetil'
+  //   Cukup cek salah satu entry Laporan. Jika ada akses ke submenu laporan
+  //   apapun, tombol Laporan di nav sudah aktif.
+  static const String _menuPathLaporan = 'report/PenjualanDetil';
 
   // ── Tooltip "Ubah Password" di header ─────────────────────
   // LayerLink menghubungkan posisi tooltip (OverlayEntry) dengan
@@ -233,6 +247,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
     if (!mounted) return;
     _checkPrinterStatus();
+    _loadStats();
   }
 
   Future<void> _loadSession() async {
@@ -243,55 +258,46 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _username = session['username'] ?? '';
       _outlets = List<int>.from(session['outlets'] ?? []);
       _menus = List<String>.from(session['menus'] ?? []);
+      _editable = List<String>.from(session['editable'] ?? []);
       _sessionLoaded = true;
     });
     _loadStats();
   }
 
   // ── Hak akses ────────────────────────────────────────────
-  // User tanpa akses store (belum terdaftar di m_user_divisi) tidak
-  // boleh masuk ke Penjualan/Penyesuaian/dst — form-nya akan kosong/
-  // rusak karena tidak ada store yang bisa dipilih. Sebelum session
-  // selesai di-load, anggap dulu enabled (hindari tile kelihatan
-  // disabled sekilas lalu berubah begitu data outlet datang).
-  bool get _hasStoreAccess => !_sessionLoaded || _outlets.isNotEmpty;
+  // Sebelum session selesai di-load, anggap semua menu enabled
+  // (hindari tile kelihatan disabled sekilas lalu berubah begitu
+  // data permission dari sesi datang).
 
-  // Menu bergrup (Penyesuaian, Kas Kecil, Transfer Order) butuh DUA
-  // syarat: akses store DAN akses menu dari grup user (m_user_grup ->
-  // m_grup_menu -> m_menu_pos), sama seperti yang dicek sidebar.php
-  // di versi web.
+  // Cek apakah path/link ada di _menus (is_view=1).
+  bool _hasViewAccess(String menuPath) =>
+      !_sessionLoaded || _menus.contains(menuPath);
+
+  // Menu yang butuh STORE + VIEW permission (Penjualan, Penyesuaian,
+  // Kas Kecil, Transfer Order): outlet tidak boleh kosong DAN
+  // path/link harus ada di _menus.
   bool _hasMenuAccess(String menuPath) =>
       !_sessionLoaded || (_outlets.isNotEmpty && _menus.contains(menuPath));
 
+  // Menu yang hanya butuh VIEW permission tanpa cek outlet:
+  // Invoice, Rekap Pembayaran, Laporan (bottom nav).
+  bool _hasViewOnlyAccess(String menuPath) => _hasViewAccess(menuPath);
+
+  bool get _hasPenjualanAccess => _hasMenuAccess(_menuPathPenjualan);
+  bool get _hasInvoiceAccess => _hasViewOnlyAccess(_menuPathInvoice);
+  bool get _hasRekapBayarAccess => _hasViewOnlyAccess(_menuPathRekapBayar);
   bool get _hasAdjustmentAccess => _hasMenuAccess(_menuPathAdjustment);
   bool get _hasKasKecilAccess => _hasMenuAccess(_menuPathKasKecil);
   bool get _hasTransferAccess => _hasMenuAccess(_menuPathTransferOrder);
+  bool get _hasLaporanAccess =>
+      !_sessionLoaded ||
+      _menus.contains('laporan') ||
+      _menus.contains('Laporan') ||
+      _menus.contains(_menuPathLaporan);
 
-  void _showNoStoreAccessWarning() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        icon: const Icon(Icons.lock_outline_rounded, color: _navy, size: 32),
-        title: const Text('Tidak Ada Akses Store'),
-        content: const Text(
-          'Akun kamu belum memiliki akses ke store manapun. Silakan hubungi admin untuk mendapatkan akses.',
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(backgroundColor: _navy),
-            child: const Text('OK', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Warning generik untuk menu yang butuh akses store + izin menu grup
-  // (Penyesuaian, Kas Kecil, Transfer Order).
-  void _showNoMenuAccessWarning(String menuName) {
-    final reason = _outlets.isEmpty
+  // Warning generik untuk menu yang membutuhkan izin akses.
+  void _showNoMenuAccessWarning(String menuName, {bool storeBound = false}) {
+    final reason = (storeBound && _outlets.isEmpty)
         ? 'Akun kamu belum memiliki akses ke store manapun.'
         : 'Akun kamu tidak memiliki izin akses menu $menuName.';
 
@@ -329,6 +335,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _invoiceHariIni = stats.invoiceCount;
         _totalPenjualan = stats.totalPenjualan;
       });
+
+      // Ambil jumlah dokumen transfer order masuk (barang datang)
+      try {
+        final transferRes = await TransferOrderService.getPendingTransferCount(
+          storeIds: _outlets,
+        );
+        if (mounted && transferRes['success'] == true) {
+          setState(() {
+            _pendingTransferCount = transferRes['count'] ?? 0;
+            final items = transferRes['data'] as List?;
+            if (items != null && items.isNotEmpty) {
+              _firstPendingKode = items[0]['kode']?.toString() ?? '';
+              _firstPendingPengirim =
+                  items[0]['toko_pengirim']?.toString() ?? '';
+            } else {
+              _firstPendingKode = '';
+              _firstPendingPengirim = '';
+            }
+          });
+        }
+      } catch (_) {}
     } catch (_) {
       // Gagal fetch — biarkan nilai 0, user bisa pull-to-refresh
     } finally {
@@ -379,16 +406,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildBody() {
     switch (_navIndex) {
       case 1:
-        return LaporanScreen(outlets: _outlets);
+        // Laporan: guard di sini kalau-kalau _navIndex sempat ke-set 1 sebelumnya
+        return _hasLaporanAccess
+            ? LaporanScreen(outlets: _outlets)
+            : _buildHomeContent();
       case 2:
-        // Jaga-jaga: seharusnya tidak tercapai karena tile bottom nav
-        // sudah di-disable saat tidak ada akses, tapi tetap dijaga di
-        // sini kalau-kalau _navIndex sempat ke-set 2 sebelumnya.
+        // Kas Kecil: guard di sini kalau-kalau _navIndex sempat ke-set 2 sebelumnya
         return _hasKasKecilAccess
             ? KasKecilScreen(outlets: _outlets)
             : _buildHomeContent();
       case 3:
-        return PengaturanScreen(outlets: _outlets);
+        // Pengaturan: pass menus & editable untuk permission check Outlet
+        return PengaturanScreen(
+          outlets: _outlets,
+          menus: _menus,
+          editable: _editable,
+        );
       default:
         return _buildHomeContent();
     }
@@ -580,51 +613,66 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Daftar menu dikelompokkan per fungsi. Menambah menu baru cukup
   // menambah _MenuItem di sini — grid yang mengatur kolom & baris.
   //
-  // PENJUALAN butuh akses store (m_user_divisi). Menu lain yang
-  // bergrup (Penyesuaian, Transfer Order) butuh akses store + izin
-  // menu dari grup user. Kalau tidak punya akses, tile di-disable
-  // (abu-abu + gembok) dan tap menampilkan warning, bukan masuk ke
-  // halaman yang kosong/rusak.
+  // Setiap card aktif (enabled) hanya jika user punya is_view=1 untuk
+  // path/link menu yang sesuai (disimpan di _menus saat login):
+  //   • Penjualan        → path 'Penjualan'   + akses outlet
+  //   • Invoice          → link 'PenjualanList'     (submenu tab)
+  //   • Rekap Pembayaran → link 'Pembayaran'        (submenu tab)
+  //   • Penyesuaian Stok → path 'penyesuaian/Adjustment' + outlet
+  //   • Perpindahan Produk → path 'rolling/TransferOrder'  + outlet
+  // Setting Printer tidak dibatasi permission (selalu aktif).
   List<_MenuGroup> _menuGroups() {
     return [
       _MenuGroup(
         title: 'Transaksi',
         items: [
+          // Penjualan: is_view=1 di 'Penjualan' + akses outlet
           _MenuItem(
             icon: Icons.shopping_cart_rounded,
             label: 'PENJUALAN',
             description: 'Kasir & transaksi penjualan produk',
-            enabled: _hasStoreAccess,
-            onTap: _hasStoreAccess
+            enabled: _hasPenjualanAccess,
+            onTap: _hasPenjualanAccess
                 ? () => _pushAndRecheckPrinter(const PenjualanScreen())
-                : _showNoStoreAccessWarning,
+                : () => _showNoMenuAccessWarning('Penjualan', storeBound: true),
           ),
+          // Invoice: submenu 'PenjualanList' is_view=1
+          // (Laporan - Penjualan - tab Invoice List)
           _MenuItem(
             icon: Icons.description_rounded,
             label: 'INVOICE',
             description: 'Riwayat transaksi & cetak ulang invoice',
-            onTap: () => _pushAndRecheckPrinter(const InvoiceListScreen()),
+            enabled: _hasInvoiceAccess,
+            onTap: _hasInvoiceAccess
+                ? () => _pushAndRecheckPrinter(const InvoiceListScreen())
+                : () => _showNoMenuAccessWarning('Invoice'),
           ),
+          // Rekap Pembayaran: submenu 'Pembayaran' is_view=1
+          // (Laporan - Pembayaran - submenu Cara Bayar)
           _MenuItem(
             icon: Icons.payments_rounded,
             label: 'REKAP PEMBAYARAN',
             description: 'Rekap omset per metode pembayaran',
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const LaporanPembayaranScreen(),
-              ),
-            ),
+            enabled: _hasRekapBayarAccess,
+            onTap: _hasRekapBayarAccess
+                ? () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const LaporanPembayaranScreen(),
+                      ),
+                    )
+                : () => _showNoMenuAccessWarning('Rekap Pembayaran'),
           ),
         ],
       ),
       _MenuGroup(
         title: 'Stok dan Gudang',
         items: [
+          // Penyesuaian Stok: 'penyesuaian/Adjustment' is_view=1 + outlet
           _MenuItem(
             icon: Icons.inventory_2_rounded,
             label: 'PENYESUAIAN STOK',
-            description: 'Update selisih & set total stok produk',
+            description: 'Pengajuan penyesuaian stok',
             enabled: _hasAdjustmentAccess,
             onTap: _hasAdjustmentAccess
                 ? () => Navigator.push(
@@ -633,19 +681,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         builder: (_) => const AdjustmentScreen(),
                       ),
                     )
-                : () => _showNoMenuAccessWarning('Penyesuaian'),
+                : () => _showNoMenuAccessWarning('Penyesuaian Stok',
+                    storeBound: true),
           ),
+          // Perpindahan Item (Mutasi Barang): 'rolling/TransferOrder' is_view=1 + outlet
           _MenuItem(
             icon: Icons.local_shipping_rounded,
-            label: 'TRANSFER ORDER',
-            description: 'Terima barang gudang pusat & ajuan penyesuaian',
+            label: 'TRANSFER ITEM',
+            description: 'Terima barang gudang pusat & transfer antar toko',
+            badgeCount: _pendingTransferCount,
             enabled: _hasTransferAccess,
             onTap: _hasTransferAccess
-                // Sementara: halaman placeholder "sedang dikembangkan".
                 ? () => _pushAndRecheckPrinter(
                       TransferOrderScreen(outlets: _outlets),
                     )
-                : () => _showNoMenuAccessWarning('Transfer Order'),
+                : () =>
+                    _showNoMenuAccessWarning('Transfer Item', storeBound: true),
           ),
         ],
       ),
@@ -676,6 +727,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ── Alert Dokumen Barang Datang (seperti di web alert-center) ──
+                if (_pendingTransferCount > 0 && !_alertDismissed) ...[
+                  _buildPendingTransferAlert(compact),
+                  SizedBox(height: compact ? 10 : 16),
+                ],
+
                 // ── Stat Cards ───────────────────────────────
                 _buildStatCards(compact: compact, gap: gap, w: w),
                 SizedBox(height: compact ? 12 : 20),
@@ -698,6 +755,113 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPendingTransferAlert(bool compact) {
+    final title = _pendingTransferCount == 1 && _firstPendingKode.isNotEmpty
+        ? 'Pengiriman Barang Masuk ($_firstPendingKode)'
+        : 'Ada $_pendingTransferCount Pengiriman Barang Masuk';
+
+    final message = _pendingTransferCount == 1 &&
+            _firstPendingPengirim.isNotEmpty
+        ? 'Ada pengiriman barang dari $_firstPendingPengirim yang harus dikonfirmasi penerimaannya.'
+        : 'Terdapat $_pendingTransferCount dokumen pengiriman barang masuk yang menunggu konfirmasi di toko Anda.';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFBFDBFE), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: _blue.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 16,
+        vertical: compact ? 10 : 12,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _blue.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.local_shipping_rounded,
+              color: _blue,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E3A8A),
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () => setState(() => _alertDismissed = true),
+                      borderRadius: BorderRadius.circular(12),
+                      child: const Padding(
+                        padding: EdgeInsets.all(2.0),
+                        child: Icon(Icons.close_rounded,
+                            size: 16, color: Colors.blueGrey),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF1E40AF),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () => _pushAndRecheckPrinter(
+                    TransferOrderScreen(outlets: _outlets),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Konfirmasi Penerimaan',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: _blue,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(Icons.arrow_forward_rounded, size: 14, color: _blue),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -759,6 +923,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 compact: compact,
                 horizontal: horizontal,
                 enabled: item.enabled,
+                badgeCount: item.badgeCount,
                 onTap: item.onTap,
               ),
             ),
@@ -888,12 +1053,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               selected: _navIndex == 0,
               onTap: () => setState(() => _navIndex = 0),
             ),
+            // Laporan: aktif jika user punya is_view=1 pada salah satu
+            // menu detail Laporan (mis. 'report/PenjualanDetil').
             _BottomNavItem(
               icon: Icons.bar_chart_rounded,
               label: 'Laporan',
-              selected: _navIndex == 1,
-              onTap: () => setState(() => _navIndex = 1),
+              selected: _hasLaporanAccess && _navIndex == 1,
+              enabled: _hasLaporanAccess,
+              onTap: _hasLaporanAccess
+                  ? () => setState(() => _navIndex = 1)
+                  : () => _showNoMenuAccessWarning('Laporan'),
             ),
+            // Kas Kecil: aktif jika 'petikes/Kas' is_view=1 + outlet
             _BottomNavItem(
               icon: Icons.wallet_outlined,
               label: 'Kas Kecil',
@@ -901,7 +1072,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               enabled: _hasKasKecilAccess,
               onTap: _hasKasKecilAccess
                   ? () => setState(() => _navIndex = 2)
-                  : () => _showNoMenuAccessWarning('Kas Kecil'),
+                  : () =>
+                      _showNoMenuAccessWarning('Kas Kecil', storeBound: true),
             ),
             _BottomNavItem(
               icon: Icons.settings_rounded,
@@ -1084,6 +1256,7 @@ class _MenuTile extends StatelessWidget {
   final bool horizontal;
   final VoidCallback onTap;
   final bool enabled;
+  final int badgeCount;
 
   const _MenuTile({
     required this.icon,
@@ -1093,6 +1266,7 @@ class _MenuTile extends StatelessWidget {
     required this.onTap,
     this.horizontal = false,
     this.enabled = true,
+    this.badgeCount = 0,
   });
 
   BoxDecoration _decoration(double radius) {
@@ -1193,6 +1367,26 @@ class _MenuTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (badgeCount > 0) ...[
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white, width: 1),
+                    ),
+                    child: Text(
+                      '$badgeCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 Container(
                   width: compact ? 24 : 28,
                   height: compact ? 24 : 28,
@@ -1256,6 +1450,26 @@ class _MenuTile extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
+                    if (badgeCount > 0) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white, width: 1.2),
+                        ),
+                        child: Text(
+                          '$badgeCount Baru',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     Container(
                       width: compact ? 26 : 32,
                       height: compact ? 26 : 32,

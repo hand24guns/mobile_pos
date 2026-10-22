@@ -11,7 +11,8 @@ class ApiService {
       GlobalKey<NavigatorState>();
 
   /// URL default (dipakai kalau user belum pernah setting custom URL).
-  static const String defaultBaseUrl = 'https://pos.aibipi.com/api';
+  // static const String defaultBaseUrl = 'https://pos.aibipi.com/api';
+  static const String defaultBaseUrl = 'http://localhost/pos/api';
 
   static const String _prefsKey = 'custom_base_url';
 

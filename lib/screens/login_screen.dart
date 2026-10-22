@@ -310,7 +310,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'v1.6.2',
+                    'v1.6.3',
                     style: TextStyle(
                       color: Colors.white54,
                       fontSize: 13,
@@ -357,7 +357,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'v1.6.2',
+                'v1.6.3',
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 14,
@@ -447,8 +447,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 fillColor: Colors.white.withValues(alpha: 0.05),
                 labelText: 'Username',
                 labelStyle: const TextStyle(color: Colors.white70),
-                floatingLabelStyle:
-                    const TextStyle(color: _LoginColors.accent),
+                floatingLabelStyle: const TextStyle(color: _LoginColors.accent),
                 prefixIcon: const Icon(
                   Icons.person_outline,
                   color: Colors.white70,
@@ -480,8 +479,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 fillColor: Colors.white.withValues(alpha: 0.05),
                 labelText: 'Password',
                 labelStyle: const TextStyle(color: Colors.white70),
-                floatingLabelStyle:
-                    const TextStyle(color: _LoginColors.accent),
+                floatingLabelStyle: const TextStyle(color: _LoginColors.accent),
                 prefixIcon: const Icon(
                   Icons.lock_outline,
                   color: Colors.white70,

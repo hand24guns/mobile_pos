@@ -123,7 +123,7 @@ class AdjustmentService {
   static Future<Map<String, dynamic>> insertItem({
     required String number,
     required String kode,
-    int qty = 1,
+    num qty = 1,
     required int organisasiId,
   }) async {
     final dio = ApiService.getDio();
@@ -199,11 +199,11 @@ class AdjustmentService {
   // GET TOTAL QTY ADJUSTMENT (TEMP)
   // RPC: POST /penjualan.php (action: getTotalQtyAdjustment)
   // ============================================================
-  static Future<int> getTotalQty({
+  static Future<double> getTotalQty({
     required String number,
     required int organisasiId,
   }) async {
-    if (number.isEmpty) return 0;
+    if (number.isEmpty) return 0.0;
 
     final dio = ApiService.getDio();
     dynamic responseData;
@@ -220,14 +220,14 @@ class AdjustmentService {
       );
       responseData = response.data;
     } catch (_) {
-      return 0;
+      return 0.0;
     }
 
     final data = _parseResponse(responseData);
     if (data['success'] == true || data['success'] == 1 || data['success'] == 'true') {
-      return int.tryParse(data['total_qty']?.toString() ?? '') ?? 0;
+      return double.tryParse(data['total_qty']?.toString() ?? '') ?? 0.0;
     }
-    return 0;
+    return 0.0;
   }
 
   // ============================================================
@@ -237,7 +237,7 @@ class AdjustmentService {
   static Future<bool> updateQty({
     required String number,
     required String kode,
-    required int qty,
+    required num qty,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;

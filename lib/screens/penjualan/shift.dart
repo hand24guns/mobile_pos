@@ -48,13 +48,19 @@ double _parseModalKasir(String text) {
 extension PenjualanShiftX on _PenjualanScreenState {
   void _startShiftPolling() {
     _shiftPollingTimer?.cancel();
-    _shiftPollingTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+    // Background polling tiap 5 menit (santai, tidak membebani jaringan/baterai)
+    // Di luar timer ini, cek shift juga otomatis dipanggil saat pull-to-refresh
+    // dan saat aplikasi di-resume dari background.
+    _shiftPollingTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       _checkShiftStillActive();
     });
   }
 
   Future<void> _checkShiftStillActive() async {
     if (_shiftID == 0 || _activeStoreID == 0 || _activeOrgID == 0) return;
+    if (_isCheckingShift) return;
+    _isCheckingShift = true;
+
     try {
       final result = await ShiftService.cekShift(
         token: _token,
@@ -62,11 +68,55 @@ extension PenjualanShiftX on _PenjualanScreenState {
         organisasiID: _activeOrgID,
         userID: _userID,
       );
+
+      // 1. Jika terjadi error koneksi / timeout / server blip -> abaikan (diam saja)
+      if (result.status == ShiftStatus.error) {
+        debugPrint('[_checkShiftStillActive] Gagal cek shift karena kendala koneksi -> abaikan.');
+        return;
+      }
+
+      // 2. Jika shift masih aktif dan milik user ini -> aman
       final stillActive =
           result.status == ShiftStatus.milikSaya && result.shiftID == _shiftID;
-      if (!stillActive && mounted) _onShiftForceClosed();
+      if (stillActive) return;
+
+      // 3. Jika server mengindikasikan shift tidak aktif, JANGAN langsung force-close!
+      // Lakukan double-check (verifikasi ulang 2 kali dengan jeda 2 detik) untuk mencegah
+      // false alarm akibat fluktuasi sinyal atau request flapping.
+      bool confirmedClosed = true;
+      for (int i = 0; i < 2; i++) {
+        await Future.delayed(const Duration(seconds: 2));
+        if (!mounted) return;
+
+        final retryResult = await ShiftService.cekShift(
+          token: _token,
+          storeID: _activeStoreID,
+          organisasiID: _activeOrgID,
+          userID: _userID,
+        );
+
+        // Jika salah satu pengecekan ulang mengalami error koneksi, jangan force-close
+        if (retryResult.status == ShiftStatus.error) {
+          debugPrint('[_checkShiftStillActive] Retry verifikasi ke-${i + 1} mengalami kendala jaringan -> batalkan force-close.');
+          confirmedClosed = false;
+          break;
+        }
+
+        // Jika shift terdeteksi masih aktif milik user ini, batalkan force-close
+        if (retryResult.status == ShiftStatus.milikSaya && retryResult.shiftID == _shiftID) {
+          debugPrint('[_checkShiftStillActive] Retry verifikasi ke-${i + 1}: shift masih aktif -> batalkan force-close.');
+          confirmedClosed = false;
+          break;
+        }
+      }
+
+      if (confirmedClosed && mounted) {
+        _onShiftForceClosed();
+      }
     } catch (_) {
       // Offline/timeout → diam saja
+    } finally {
+      _isCheckingShift = false;
     }
   }
 

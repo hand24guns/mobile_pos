@@ -9,7 +9,8 @@ class SessionService {
   static const String _keyNama        = 'nama';
   static const String _keyUsername    = 'username';
   static const String _keyOutlets     = 'outlets'; // CSV: "1,2,3"
-  static const String _keyMenus       = 'menus';   // JSON array of menu path, e.g. ["penyesuaian/Adjustment"]
+  static const String _keyMenus       = 'menus';   // JSON array of menu path/link with is_view=1
+  static const String _keyEditable    = 'editable'; // JSON array of menu detail path with is_edit=1
   static const String _keyDeviceToken = 'device_token';
 
   // Token disimpan terpisah lewat flutter_secure_storage (Android
@@ -44,6 +45,7 @@ class SessionService {
     required String username,
     required List<int> outlets,
     List<String> menus = const [],
+    List<String> editable = const [],
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await _secureStorage.write(key: _keyToken, value: token);
@@ -52,6 +54,7 @@ class SessionService {
     await prefs.setString(_keyUsername, username);
     await prefs.setString(_keyOutlets,  outlets.join(','));
     await prefs.setString(_keyMenus,    jsonEncode(menus));
+    await prefs.setString(_keyEditable, jsonEncode(editable));
   }
 
   // ============================================================
@@ -67,6 +70,7 @@ class SessionService {
       'username': prefs.getString(_keyUsername) ?? '',
       'outlets':  _parseOutlets(raw),
       'menus':    _parseMenus(prefs.getString(_keyMenus) ?? ''),
+      'editable': _parseMenus(prefs.getString(_keyEditable) ?? ''),
     };
   }
 
@@ -101,6 +105,7 @@ class SessionService {
     await prefs.remove(_keyUsername);
     await prefs.remove(_keyOutlets);
     await prefs.remove(_keyMenus);
+    await prefs.remove(_keyEditable);
   }
 
   // ── Helper private ─────────────────────────────────────────

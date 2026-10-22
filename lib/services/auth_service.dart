@@ -84,6 +84,10 @@ class AuthService {
         final menus = List<String>.from(
             (rawMenus as List? ?? []).map((e) => e.toString()));
 
+        final rawEditable = payload['editable'] ?? responseData['editable'];
+        final editable = List<String>.from(
+            (rawEditable as List? ?? []).map((e) => e.toString()));
+
         await SessionService.saveSession(
           token: token,
           userID: userId,
@@ -91,6 +95,7 @@ class AuthService {
           username: usernameVal,
           outlets: outlets,
           menus: menus,
+          editable: editable,
         );
       }
 

@@ -44,7 +44,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   String _storeName = '';
   String _number = '';
   final DateTime _tanggal = DateTime.now();
-  String _tipe = 'adjust'; // 'adjust' = Update Selisih, 'count' = Set Total
+  String _tipe = 'count'; // 'count' = Set Total, 'adjust' = Update Selisih
 
   // ── SKU search — auto-focus untuk barcode scanner, sama seperti
   // penjualan_screen.dart (_skuKeyboardVisible menahan keyboard virtual
@@ -54,7 +54,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   bool _skuKeyboardVisible = false;
 
   List<Map<String, dynamic>> _items = [];
-  int _totalQty = 0;
+  double _totalQty = 0;
 
   // ── Image grid per kategori — pola identik dengan products.dart /
   // widgets_grid.dart di penjualan_screen.dart
@@ -288,7 +288,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
     } catch (_) {}
   }
 
-  Future<void> _updateQty(String kode, int qty) async {
+  Future<void> _updateQty(String kode, double qty) async {
     try {
       final ok = await AdjustmentService.updateQty(
         number: _number,
@@ -376,7 +376,8 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Text('Berhasil'),
-            content: const Text('Transaksi penyesuaian berhasil disimpan'),
+            content: const Text(
+                'Pengajuan penyesuaian stok berhasil, menunggu approval'),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(context),
@@ -400,6 +401,9 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
   // ============================================================
   String _formatDate(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  String _formatQty(num q) =>
+      q % 1 == 0 ? q.toInt().toString() : q.toString();
 
   void _showError(String message) {
     if (!mounted) return;
@@ -547,11 +551,9 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                     border: OutlineInputBorder(),
                   ),
                   items: const [
-                    DropdownMenuItem(
-                        value: 'adjust', child: Text('Update Selisih')),
                     DropdownMenuItem(value: 'count', child: Text('Set Total')),
                     DropdownMenuItem(
-                        value: 'countAll', child: Text('Stock Opname')),
+                        value: 'adjust', child: Text('Update Selisih')),
                   ],
                   onChanged: (val) {
                     if (val != null) setState(() => _tipe = val);
@@ -746,13 +748,17 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
       separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (_, i) {
         final item = _items[i];
+        final qty = double.tryParse(item['qty']?.toString() ?? '') ?? 0.0;
+        final uom = item['uom']?.toString() ?? '';
         return _AdjustmentItemRow(
           index: i + 1,
-          kode: item['kode'],
-          nama: item['nama'],
-          qty: item['qty'],
-          onQtyChanged: (qty) => _updateQty(item['kode'], qty),
-          onDelete: () => _deleteItem(item['kode']),
+          kode: item['kode']?.toString() ?? '',
+          nama: item['nama']?.toString() ?? '',
+          qty: qty,
+          uom: uom,
+          onQtyChanged: (newQty) =>
+              _updateQty(item['kode']?.toString() ?? '', newQty),
+          onDelete: () => _deleteItem(item['kode']?.toString() ?? ''),
         );
       },
     );
@@ -781,7 +787,7 @@ class _AdjustmentScreenState extends ConsumerState<AdjustmentScreen> {
                 children: [
                   const Text('TOTAL QTY',
                       style: TextStyle(fontSize: 11, color: Colors.grey)),
-                  Text('$_totalQty',
+                  Text(_formatQty(_totalQty),
                       style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -890,14 +896,15 @@ class _AdjustmentImageTileState extends State<_AdjustmentImageTile> {
 }
 
 // ============================================================
-// WIDGET: baris item produk (qty editable + delete)
+// WIDGET: baris item produk (qty editable + uom + delete)
 // ============================================================
 class _AdjustmentItemRow extends StatefulWidget {
   final int index;
   final String kode;
   final String nama;
-  final int qty;
-  final ValueChanged<int> onQtyChanged;
+  final double qty;
+  final String uom;
+  final ValueChanged<double> onQtyChanged;
   final VoidCallback onDelete;
 
   const _AdjustmentItemRow({
@@ -905,6 +912,7 @@ class _AdjustmentItemRow extends StatefulWidget {
     required this.kode,
     required this.nama,
     required this.qty,
+    required this.uom,
     required this.onQtyChanged,
     required this.onDelete,
   });
@@ -917,18 +925,22 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
   late final TextEditingController _qtyController;
   Timer? _debounce;
 
+  static String _formatVal(num q) =>
+      q % 1 == 0 ? q.toInt().toString() : q.toString();
+
   @override
   void initState() {
     super.initState();
-    _qtyController = TextEditingController(text: widget.qty.toString());
+    _qtyController = TextEditingController(text: _formatVal(widget.qty));
   }
 
   @override
   void didUpdateWidget(covariant _AdjustmentItemRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.qty != widget.qty &&
-        _qtyController.text != widget.qty.toString()) {
-      _qtyController.text = widget.qty.toString();
+    final currentParsed =
+        double.tryParse(_qtyController.text.replaceAll(',', '.'));
+    if (oldWidget.qty != widget.qty && currentParsed != widget.qty) {
+      _qtyController.text = _formatVal(widget.qty);
     }
   }
 
@@ -940,7 +952,8 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
   }
 
   void _onChanged(String val) {
-    final qty = int.tryParse(val);
+    final normalized = val.replaceAll(',', '.').trim();
+    final qty = double.tryParse(normalized);
     if (qty == null) return;
     _debounce?.cancel();
     _debounce = Timer(
@@ -983,10 +996,13 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
           ),
           const SizedBox(width: 6),
           SizedBox(
-            width: 56,
+            width: 64,
             child: TextField(
               controller: _qtyController,
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*[\.,]?\d*')),
+              ],
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 13),
               decoration: const InputDecoration(
@@ -998,6 +1014,17 @@ class _AdjustmentItemRowState extends State<_AdjustmentItemRow> {
               onChanged: _onChanged,
             ),
           ),
+          if (widget.uom.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text(
+              widget.uom,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ],
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
             padding: EdgeInsets.zero,

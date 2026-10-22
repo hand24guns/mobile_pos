@@ -161,6 +161,35 @@ extension PenjualanDataX on _PenjualanScreenState {
       userID: _userID,
     );
 
+    if (shiftRes.status == ShiftStatus.error) {
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Gagal Memeriksa Shift'),
+          content: const Text(
+            'Koneksi internet bermasalah saat memeriksa status shift.\n'
+            'Silakan periksa koneksi Anda dan coba lagi.',
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1D273B),
+              ),
+              child: const Text('OK', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      _goToHome();
+      return;
+    }
+
+    if (shiftRes.status == ShiftStatus.milikSaya) {
+      _shiftID = shiftRes.shiftID;
+    }
+
     if (shiftRes.status == ShiftStatus.milikOrangLain) {
       // Store sedang dipakai orang lain → notif → kembali ke HomeScreen
       if (!mounted) return;

@@ -49,7 +49,8 @@ class PenjualanScreen extends ConsumerStatefulWidget {
   ConsumerState<PenjualanScreen> createState() => _PenjualanScreenState();
 }
 
-class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
+class _PenjualanScreenState extends ConsumerState<PenjualanScreen>
+    with WidgetsBindingObserver {
   final _skuController = TextEditingController();
   final _memberController = TextEditingController();
   final _nominalController = TextEditingController();
@@ -107,6 +108,7 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
 
   // ── Shift polling ─────────────────────────────────────────────
   Timer? _shiftPollingTimer;
+  bool _isCheckingShift = false;
   int _activeStoreID = 0;
   int _activeOrgID = 0;
   String _activeStoreName = '';
@@ -137,12 +139,14 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadMinimalData().then((_) => _focusSku());
     _startShiftPolling();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _shiftPollingTimer?.cancel();
     _skuController.dispose();
     _skuFocusNode.dispose();
@@ -153,6 +157,13 @@ class _PenjualanScreenState extends ConsumerState<PenjualanScreen> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkShiftStillActive();
+    }
   }
 
   // Wrapper agar extension di file part lain bisa panggil setState
