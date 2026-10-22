@@ -536,10 +536,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     String? errorMessage;
 
     const voidReasons = [
-      'Salah Payment',
-      'Salah Item',
+      'Salah Cara Bayar',
       'Cancel Order',
-      'Salah Channel',
+      'Salah Item',
       'Lainnya',
     ];
 
@@ -670,11 +669,11 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                   final text = otherCtrl.text.trim();
                   if (text.isEmpty) {
                     setDialogState(() {
-                      errorMessage = 'Keterangan lainnya tidak boleh kosong';
+                      errorMessage = 'Keterangan alasan tidak boleh kosong';
                     });
                     return;
                   }
-                  Navigator.pop(ctx, text);
+                  Navigator.pop(ctx, 'Lainnya - ');
                 } else {
                   Navigator.pop(ctx, selectedReason);
                 }
