@@ -293,7 +293,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       !_sessionLoaded ||
       _menus.contains('laporan') ||
       _menus.contains('Laporan') ||
-      _menus.contains(_menuPathLaporan);
+      _menus.contains('report/Onhand') ||
+      _menus.contains(_menuPathLaporan) ||
+      _menus.contains('PenjualanProduk') ||
+      _menus.contains('PenjualanChannel');
 
   // Warning generik untuk menu yang membutuhkan izin akses.
   void _showNoMenuAccessWarning(String menuName, {bool storeBound = false}) {
@@ -408,7 +411,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       case 1:
         // Laporan: guard di sini kalau-kalau _navIndex sempat ke-set 1 sebelumnya
         return _hasLaporanAccess
-            ? LaporanScreen(outlets: _outlets)
+            ? LaporanScreen(outlets: _outlets, menus: _menus)
             : _buildHomeContent();
       case 2:
         // Kas Kecil: guard di sini kalau-kalau _navIndex sempat ke-set 2 sebelumnya
