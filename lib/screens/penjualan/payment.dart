@@ -183,6 +183,16 @@ extension PenjualanPaymentX on _PenjualanScreenState {
                 ],
               ),
               actions: [
+                // -- Share Invoice --
+                TextButton.icon(
+                  onPressed: () => _shareInvoice(
+                    invoiceNumber: state.number,
+                    kembalian: (kembalian as num).toDouble(),
+                    currentState: state,
+                  ),
+                  icon: const Icon(Icons.share, size: 18),
+                  label: const Text('Share ...'),
+                ),
                 // ── Tombol Print — adaptif FnB vs non-FnB ───────
                 if (_isFnb)
                   // FnB: satu tombol → buka bottom sheet pilih
@@ -285,6 +295,52 @@ extension PenjualanPaymentX on _PenjualanScreenState {
     }
   }
 
+  // ============================================================
+  // SHARE INVOICE
+  // ============================================================
+  // SHARE INVOICE — rekap singkat + URL landing page
+  // ============================================================
+  //
+  // Share teks ringkas (nomor, toko, tanggal, total) + link landing
+  // page webapp agar penerima bisa lihat invoice lengkap & export PDF.
+  //
+  Future<void> _shareInvoice({
+    required String invoiceNumber,
+    required double kembalian,
+    required PenjualanState currentState,
+  }) async {
+    // ── URL landing page di webapp ───────────────────────────
+    // Ambil base URL dari ApiService (contoh: 'http://192.168.1.1/pos/api')
+    final baseUrl = ApiService.baseUrl;
+    final webBase = baseUrl.endsWith('/api')
+        ? '${baseUrl.substring(0, baseUrl.length - 4)}/'
+        : (baseUrl.endsWith('/api/')
+            ? '${baseUrl.substring(0, baseUrl.length - 5)}/'
+            : (baseUrl.endsWith('/') ? baseUrl : '$baseUrl/'));
+    final landingUrl =
+        '${webBase}InvoiceLanding.php?number=${Uri.encodeComponent(invoiceNumber)}';
+
+    // ── Tanggal sekarang ─────────────────────────────────────
+    final now = DateTime.now();
+    final tanggalStr =
+        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    // ── Teks ringkas: Nomor, Toko, Tanggal, Total + URL ─────
+    final sb = StringBuffer();
+    sb.writeln('*INVOICE:* $invoiceNumber');
+    sb.writeln('Toko: *${currentState.storeName}*');
+    sb.writeln('Tanggal: $tanggalStr');
+    sb.writeln('Total: *Rp ${CurrencyFormat.format(currentState.total)}*');
+    sb.writeln('');
+    sb.writeln('Lihat invoice:');
+    sb.write(landingUrl);
+
+    await Share.share(
+      sb.toString(),
+      subject: 'Invoice $invoiceNumber',
+    );
+  }
   Future<void> _kirimWADanEmail({
     required String invoiceNumber,
     required int storeID,

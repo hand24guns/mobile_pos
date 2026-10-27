@@ -138,6 +138,7 @@ class OrderService {
     required int invoiceId,
     required String notes,
     int? userId,
+    bool boxTerpakai = false,
   }) async {
     final dio = ApiService.getDio();
     dynamic responseData;
@@ -149,6 +150,7 @@ class OrderService {
           'action': 'voidInvoice',
           'id': invoiceId,
           'notes': notes,
+          'box_terpakai': boxTerpakai ? '1' : '0',
           if (userId != null && userId > 0) 'userID': userId,
         }),
       );

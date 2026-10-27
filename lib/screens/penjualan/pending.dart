@@ -142,6 +142,9 @@ extension PenjualanPendingX on _PenjualanScreenState {
                 itemCount: orders.length,
                 itemBuilder: (_, i) {
                   final order = orders[i];
+                  // Status 'REQ VO' = void sudah diajukan, menunggu approval
+                  final isReqVoid =
+                      (order['status']?.toString() ?? '') == 'REQ VO';
                   return Card(
                     margin: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -152,11 +155,41 @@ extension PenjualanPendingX on _PenjualanScreenState {
                         Icons.receipt_long,
                         color: Color(0xFF1D273B),
                       ),
-                      title: Text(
-                        order['label']?.isNotEmpty == true
-                            ? order['label']
-                            : order['kode'],
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      title: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              order['label']?.isNotEmpty == true
+                                  ? order['label']
+                                  : order['kode'],
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isReqVoid) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                border: Border.all(color: Colors.red),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'REQ VOID',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       subtitle: Text(
                         '${(order['member'] as String?)?.isNotEmpty == true ? order['member'] : 'Tanpa Member'} • ${order['created_date'].toString().substring(0, 16)}',
@@ -176,27 +209,37 @@ extension PenjualanPendingX on _PenjualanScreenState {
                             },
                           ),
                           IconButton(
-                            icon: const Icon(
+                            icon: Icon(
                               Icons.play_circle,
-                              color: Colors.green,
+                              color: isReqVoid ? Colors.grey : Colors.green,
                             ),
-                            onPressed: () async {
-                              Navigator.pop(context);
-                              await _retrievePending(
-                                int.parse(order['id'].toString()),
-                                order['member'] as String? ?? '',
-                              );
-                            },
+                            // Order yang sudah REQ VO tidak bisa di-retrieve
+                            onPressed: isReqVoid
+                                ? null
+                                : () async {
+                                    Navigator.pop(context);
+                                    await _retrievePending(
+                                      int.parse(order['id'].toString()),
+                                      order['member'] as String? ?? '',
+                                    );
+                                  },
                           ),
                           IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () async {
+                            icon: Icon(
+                              Icons.delete,
+                              color: isReqVoid ? Colors.grey : Colors.red,
+                            ),
+                            tooltip: 'Ajukan Void',
+                            // Sudah diajukan void → tidak perlu diajukan lagi
+                            onPressed: isReqVoid
+                                ? null
+                                : () async {
                               final del = await showDialog<bool>(
                                 context: context,
                                 builder: (_) => AlertDialog(
-                                  title: const Text('Hapus Order?'),
+                                  title: const Text('Ajukan Void Order?'),
                                   content: Text(
-                                    'Order ${order['label'] ?? order['kode']} akan dihapus.',
+                                    'Request void untuk order ${order['label']?.toString().isNotEmpty == true ? order['label'] : order['kode']} akan diajukan.',
                                   ),
                                   actions: [
                                     TextButton(
@@ -211,7 +254,7 @@ extension PenjualanPendingX on _PenjualanScreenState {
                                         backgroundColor: Colors.red,
                                       ),
                                       child: const Text(
-                                        'Hapus',
+                                        'Ajukan',
                                         style: TextStyle(color: Colors.white),
                                       ),
                                     ),
@@ -222,8 +265,21 @@ extension PenjualanPendingX on _PenjualanScreenState {
                                 if (mounted)
                                   Navigator.pop(
                                       context); // Tutup bottom sheet aktif
-                                await _deletePending(
+                                final ok = await _deletePending(
                                     int.parse(order['id'].toString()));
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        ok
+                                            ? 'Request void pending order diajukan'
+                                            : 'Gagal mengajukan void pending order',
+                                      ),
+                                      backgroundColor:
+                                          ok ? Colors.orange : Colors.red,
+                                    ),
+                                  );
+                                }
                                 if (mounted) {
                                   _showRetrieveDialog(); // Panggil dialog segar dari konteks utama
                                 }
@@ -361,11 +417,14 @@ extension PenjualanPendingX on _PenjualanScreenState {
     ref.read(penjualanProvider.notifier).updateItems(items);
   }
 
-  // Void pending order (server: UPDATE status = 'VO', bukan delete keras —
-  // histori order & detail tetap ada untuk audit).
-  Future<void> _deletePending(int salesOrderID) async {
+  // Ajukan void pending order (server: UPDATE status = 'REQ VO', bukan delete
+  // keras — histori order & detail tetap ada untuk audit). Return true kalau
+  // pengajuan berhasil.
+  Future<bool> _deletePending(int salesOrderID) async {
     final session = await SessionService.getSession();
-    await PendingOrderService.deletePending(
+    // PendingOrderService.deletePending sudah mengembalikan bool
+    // (true kalau server membalas success: true).
+    return await PendingOrderService.deletePending(
       salesOrderId: salesOrderID,
       userId: session['user_id'],
     );

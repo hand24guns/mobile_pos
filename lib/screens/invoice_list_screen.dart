@@ -533,6 +533,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   Future<void> _requestVoid(Map<String, dynamic> invoice) async {
     final TextEditingController otherCtrl = TextEditingController();
     String? selectedReason;
+    bool boxTerpakai = false;
     String? errorMessage;
 
     const voidReasons = [
@@ -542,7 +543,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       'Lainnya',
     ];
 
-    final String? chosenReason = await showDialog<String>(
+    // Alasan yang memunculkan checkbox "Box terpakai"
+    const boxReasons = ['Cancel Order', 'Lainnya'];
+
+    final Map<String, dynamic>? result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
@@ -577,6 +581,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                   onChanged: (val) {
                     setDialogState(() {
                       selectedReason = val;
+                      if (!boxReasons.contains(selectedReason)) {
+                        boxTerpakai = false;
+                      }
                       errorMessage = null;
                     });
                   },
@@ -586,6 +593,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                         onTap: () {
                           setDialogState(() {
                             selectedReason = reason;
+                            if (!boxReasons.contains(selectedReason)) {
+                              boxTerpakai = false;
+                            }
                             errorMessage = null;
                           });
                         },
@@ -615,6 +625,24 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                     }).toList(),
                   ),
                 ),
+                if (boxReasons.contains(selectedReason)) ...[
+                  const SizedBox(height: 4),
+                  CheckboxListTile(
+                    value: boxTerpakai,
+                    onChanged: (v) =>
+                        setDialogState(() => boxTerpakai = v ?? false),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    activeColor: Colors.red,
+                    title: const Text('Box terpakai',
+                        style: TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600)),
+                    subtitle: const Text(
+                        'Stok box tidak dikembalikan saat void disetujui',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ],
                 if (selectedReason == 'Lainnya') ...[
                   const SizedBox(height: 8),
                   TextField(
@@ -673,9 +701,15 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                     });
                     return;
                   }
-                  Navigator.pop(ctx, 'Lainnya - ');
+                  Navigator.pop(ctx, {
+                    'reason': 'Lainnya - $text',
+                    'box': boxTerpakai,
+                  });
                 } else {
-                  Navigator.pop(ctx, selectedReason);
+                  Navigator.pop(ctx, {
+                    'reason': selectedReason,
+                    'box': boxTerpakai,
+                  });
                 }
               },
               child: const Text('Kirim Request',
@@ -688,8 +722,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
     otherCtrl.dispose();
 
-    if (chosenReason == null || chosenReason.trim().isEmpty) return;
-    final notes = chosenReason.trim();
+    if (result == null) return;
+    final notes = (result['reason'] ?? '').toString().trim();
+    if (notes.isEmpty) return;
+    final bool isBoxTerpakai = result['box'] == true;
 
     if (!mounted) return;
     showDialog(
@@ -704,6 +740,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
         invoiceId: invoiceId,
         notes: notes,
         userId: _userID,
+        boxTerpakai: isBoxTerpakai,
       );
 
       if (mounted) Navigator.pop(context);

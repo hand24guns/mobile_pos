@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +28,8 @@ import '../../widgets/package_dialog.dart';
 import '../../widgets/add_member_sheet.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../services/api_service.dart';
 
 // ── File ini dipecah ke beberapa part untuk maintenance ──
 part 'shift.dart';

@@ -3,7 +3,7 @@ description: Mobile POS Aibipi
 
 publish_to: 'none'
 
-version: 1.6.3+54
+version: 1.6.4+55
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -29,6 +29,7 @@ dependencies:
   flutter_cache_manager: ^3.4.1
   flutter_secure_storage: ^9.2.2
   image_picker: ^1.1.2
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_test:
