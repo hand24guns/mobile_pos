@@ -606,13 +606,10 @@ class PrinterHelper {
 
       // ── Pemisah antar item (garis hr + jarak baris kosong) ──
       if (idx < items.length - 1) {
-        bytes += generator.emptyLines(1);
         bytes += generator.hr();
-        bytes += generator.emptyLines(1);
       }
     }
 
-    bytes += generator.emptyLines(1);
     bytes += generator.hr();
 
     // ── Catatan order keseluruhan ────────────────────────────────

@@ -3,7 +3,7 @@ description: Mobile POS Aibipi
 
 publish_to: 'none'
 
-version: 1.6.4+55
+version: 1.6.5+56
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
