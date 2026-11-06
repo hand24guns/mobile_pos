@@ -15,6 +15,7 @@ import 'pengaturan_screen.dart';
 import 'petikes/petikes_screen.dart';
 import 'transfer_order/transfer_order_screen.dart';
 import '../services/transfer_order_service.dart';
+import '../widgets/trial_alert_banner.dart';
 
 // ─── Palette ────────────────────────────────────────────────
 // Warna utama: slate gelap #151F2C. Gradasi dibuat dengan menaikkan
@@ -76,6 +77,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   List<String> _menus = [];
   List<String> _editable = []; // path menu detail yang user punya is_edit=1
   bool _sessionLoaded = false;
+
+  // Status masa ujicoba (trial)
+  TrialStatus? _trialStatus;
+  bool _trialAlertDismissed = false;
 
   // Perpindahan Stok (Transfer Order) alert & badge
   int _pendingTransferCount = 0;
@@ -337,6 +342,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         }
         _invoiceHariIni = stats.invoiceCount;
         _totalPenjualan = stats.totalPenjualan;
+        _trialStatus = stats.trialStatus;
       });
 
       // Ambil jumlah dokumen transfer order masuk (barang datang)
@@ -730,6 +736,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ── Alert Masa Trial (seperti di web alert-center) ──
+                if (_trialStatus != null &&
+                    _trialStatus!.shouldShowAlert &&
+                    !_trialAlertDismissed) ...[
+                  TrialAlertBanner(
+                    trialStatus: _trialStatus!,
+                    compact: compact,
+                    onDismiss: () =>
+                        setState(() => _trialAlertDismissed = true),
+                  ),
+                  SizedBox(height: compact ? 10 : 16),
+                ],
+
                 // ── Alert Dokumen Barang Datang (seperti di web alert-center) ──
                 if (_pendingTransferCount > 0 && !_alertDismissed) ...[
                   _buildPendingTransferAlert(compact),

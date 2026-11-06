@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/session_service.dart';
 import '../services/order_service.dart';
@@ -60,6 +61,10 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   int? _selectedStoreId; // null = semua outlet
   String? _selectedStoreName;
   List<Map<String, dynamic>> _storeOptions = []; // [{id, nama}] — diambil dari getStores
+
+  List<Map<String, dynamic>> _baseInvoices = [];
+  Timer? _searchDebounce;
+  bool _isSearchingServer = false;
 
   // ── Filter search (baru) — cari no invoice / customer / kasir ──
   final TextEditingController _searchCtrl = TextEditingController();
@@ -134,16 +139,14 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
       _selectedStoreName = widget.initialStoreName;
     }
     _searchCtrl.addListener(() {
-      setState(() {
-        _searchQuery = _searchCtrl.text;
-        _currentPage = 0;
-      });
+      _onSearchChanged(_searchCtrl.text);
     });
     _loadData();
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -200,6 +203,7 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
     if (!mounted) return;
 
     setState(() {
+      _baseInvoices = invoices;
       _invoices = invoices;
       _currentPage = 0;
       // Rebuild unique cara_bayar list dari data baru
@@ -237,6 +241,92 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
         _selectedChannelName = channelMap[_selectedChannelId];
       }
     });
+  }
+
+  // ── Smart Search: Cari lokal dulu, jika tidak ada langsung cari ke server (global) ──
+  void _onSearchChanged(String value) {
+    final query = value.trim();
+    if (query == _searchQuery && query.isNotEmpty) return;
+
+    setState(() {
+      _searchQuery = query;
+      _currentPage = 0;
+    });
+
+    _searchDebounce?.cancel();
+
+    if (query.isEmpty) {
+      if (_invoices != _baseInvoices) {
+        setState(() {
+          _invoices = List.from(_baseInvoices);
+        });
+      }
+      return;
+    }
+
+    // 1. Cek apakah invoice cocok di data lokal yang sudah dimuat (_baseInvoices)
+    final lower = query.toLowerCase();
+    final localMatches = _baseInvoices.where((inv) {
+      final kode = (inv['kode'] ?? '').toString().toLowerCase();
+      final member = (inv['member'] ?? '').toString().toLowerCase();
+      final kasir = (inv['kasir'] ?? '').toString().toLowerCase();
+      return kode.contains(lower) ||
+          member.contains(lower) ||
+          kasir.contains(lower);
+    }).toList();
+
+    if (localMatches.isNotEmpty) {
+      // Ada di data lokal, tampilkan
+      if (_invoices != _baseInvoices) {
+        setState(() {
+          _invoices = List.from(_baseInvoices);
+        });
+      }
+    } else {
+      // Tidak ditemukan di data lokal, jadwalkan pencarian global ke server (debounce 500ms)
+      _searchDebounce = Timer(const Duration(milliseconds: 500), () {
+        _searchServer(query);
+      });
+    }
+  }
+
+  Future<void> _searchServer(String query) async {
+    _searchDebounce?.cancel();
+    final q = query.trim();
+    if (q.isEmpty) {
+      setState(() {
+        _invoices = List.from(_baseInvoices);
+      });
+      return;
+    }
+
+    setState(() => _isSearchingServer = true);
+
+    final dateFrom = _dateFrom.toIso8601String().substring(0, 10);
+    final dateTo = _dateTo.toIso8601String().substring(0, 10);
+
+    try {
+      final results = await OrderService.getInvoices(
+        userId: _userID,
+        organisasiId: _organisasiID,
+        storeId: _activeStoreID,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        search: q,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _isSearchingServer = false;
+        _invoices = results;
+        _currentPage = 0;
+      });
+    } catch (e) {
+      debugPrint('ERROR _searchServer: $e');
+      if (!mounted) return;
+      setState(() => _isSearchingServer = false);
+    }
   }
 
   Future<void> _pickDateRange() async {
@@ -1086,13 +1176,9 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
                   // ── Konten putih ───────────────────────────────
                   Expanded(
-                    child: filtered.isEmpty && !_hasActiveFilter
-                        ? const Center(
-                            child: Text('Tidak ada transaksi',
-                                style: TextStyle(color: Colors.grey)))
-                        : ListView(
-                            padding: const EdgeInsets.all(16),
-                            children: [
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
                               // Stat cards
                               LayoutBuilder(builder: (ctx, constraints) {
                                 final isNarrow = constraints.maxWidth < 640;
@@ -1181,7 +1267,13 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                       : _pickStore,
                                 );
                                 final filterBtn = ElevatedButton.icon(
-                                  onPressed: _loadInvoices,
+                                  onPressed: () {
+                                    if (_searchQuery.trim().isNotEmpty) {
+                                      _searchServer(_searchQuery.trim());
+                                    } else {
+                                      _loadInvoices();
+                                    }
+                                  },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1D273B),
                                     foregroundColor: Colors.white,
@@ -1317,15 +1409,64 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                 ),
                               ],
 
+                              if (_isSearchingServer) ...[
+                                const SizedBox(height: 10),
+                                const LinearProgressIndicator(
+                                  backgroundColor: Colors.transparent,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Color(0xFF1D273B)),
+                                ),
+                              ],
+
                               const SizedBox(height: 16),
 
                               // List
                               if (filtered.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 40),
                                   child: Center(
-                                    child: Text('Tidak ada transaksi yang cocok',
-                                        style: TextStyle(color: Colors.grey)),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.receipt_long_outlined,
+                                          size: 48,
+                                          color: Colors.grey.shade400,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          _searchQuery.isNotEmpty
+                                              ? 'Invoice atau transaksi tidak ditemukan'
+                                              : _hasActiveFilter
+                                                  ? 'Tidak ada transaksi yang cocok'
+                                                  : 'Belum ada transaksi hari ini',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        if (_searchQuery.isNotEmpty) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            'Tidak ditemukan transaksi dengan kata kunci "$_searchQuery"',
+                                            style: TextStyle(
+                                              color: Colors.grey.shade400,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ] else if (!_hasActiveFilter) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            'Pilih filter tanggal di atas untuk melihat periode lain',
+                                            style: TextStyle(
+                                              color: Colors.grey.shade400,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
                                   ),
                                 )
                               else
@@ -1461,16 +1602,28 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
   Widget _searchField() {
     return TextField(
       controller: _searchCtrl,
+      textInputAction: TextInputAction.search,
+      onSubmitted: (val) => _searchServer(val),
       decoration: InputDecoration(
         hintText: 'Cari no invoice / customer / kasir',
         hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
         prefixIcon: Icon(Icons.search, color: Colors.grey.shade400, size: 20),
-        suffixIcon: _searchQuery.isEmpty
-            ? null
-            : IconButton(
-                icon: Icon(Icons.close, color: Colors.grey.shade400, size: 18),
-                onPressed: () => _searchCtrl.clear(),
-              ),
+        suffixIcon: _isSearchingServer
+            ? const Padding(
+                padding: EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            : _searchQuery.isEmpty
+                ? null
+                : IconButton(
+                    icon: Icon(Icons.close,
+                        color: Colors.grey.shade400, size: 18),
+                    onPressed: () => _searchCtrl.clear(),
+                  ),
         filled: true,
         fillColor: Colors.white,
         contentPadding:

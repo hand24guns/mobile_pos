@@ -3,26 +3,62 @@ import 'package:dio/dio.dart';
 import 'api_service.dart';
 import 'session_service.dart';
 
+class TrialStatus {
+  final String organisasi;
+  final String? tglSelesai;
+  final bool expired;
+  final int? daysRemaining;
+  final String whatsappUrl;
+
+  const TrialStatus({
+    this.organisasi = '',
+    this.tglSelesai,
+    this.expired = false,
+    this.daysRemaining,
+    this.whatsappUrl = '',
+  });
+
+  /// Alert tampil jika belum expired dan sisa hari <= 14 (H-14)
+  bool get shouldShowAlert =>
+      !expired &&
+      daysRemaining != null &&
+      daysRemaining! >= 0 &&
+      daysRemaining! <= 14;
+
+  factory TrialStatus.fromJson(Map<String, dynamic> json) {
+    return TrialStatus(
+      organisasi: json['organisasi']?.toString() ?? '',
+      tglSelesai: json['tglselesai']?.toString(),
+      expired: json['expired'] == true ||
+          json['expired'] == 1 ||
+          json['expired'] == 'true',
+      daysRemaining: json['days_remaining'] is num
+          ? (json['days_remaining'] as num).toInt()
+          : int.tryParse(json['days_remaining']?.toString() ?? ''),
+      whatsappUrl: json['whatsapp_url']?.toString() ?? '',
+    );
+  }
+}
+
 class DashboardStats {
   final int invoiceCount;
   final double totalPenjualan;
   final List<int> storeIds;
+  final TrialStatus? trialStatus;
 
   const DashboardStats({
     this.invoiceCount = 0,
     this.totalPenjualan = 0.0,
     this.storeIds = const [],
+    this.trialStatus,
   });
 }
 
 class DashboardService {
   // ============================================================
   // GET DASHBOARD STATS
-  // Mengambil total invoice hari ini dan total nominal penjualan
-  // untuk daftar store_ids yang diberikan (atau auto-resolve jika kosong).
-  //
-  // REST API: GET /v1/dashboard?store_ids=1,2,3
-  // Fallback: POST /penjualan.php (action: getDashboard)
+  // Mengambil total invoice hari ini, total nominal penjualan,
+  // dan status trial organisasi untuk daftar store_ids.
   // ============================================================
   static Future<DashboardStats> getStats({
     List<int> storeIds = const [],
@@ -115,13 +151,47 @@ class DashboardService {
           ? rawTotal.toDouble()
           : double.tryParse(rawTotal?.toString() ?? '') ?? 0.0;
 
+      final rawTrial = payload['trial_status'] ?? data['trial_status'];
+      TrialStatus? trialStatus;
+      if (rawTrial is Map<String, dynamic>) {
+        trialStatus = TrialStatus.fromJson(rawTrial);
+      }
+
       return DashboardStats(
         invoiceCount: invoiceCount,
         totalPenjualan: totalPenjualan,
         storeIds: effectiveStoreIds,
+        trialStatus: trialStatus,
       );
     }
 
     return DashboardStats(storeIds: effectiveStoreIds);
+  }
+
+  // ============================================================
+  // GET TRIAL STATUS LANGSUNG
+  // ============================================================
+  static Future<TrialStatus?> getTrialStatus() async {
+    final dio = ApiService.getDio();
+    try {
+      final response = await dio.post(
+        '/penjualan.php',
+        data: FormData.fromMap({
+          'action': 'getTrialStatus',
+        }),
+      );
+      final dynamic raw = response.data;
+      Map<String, dynamic> data = {};
+      if (raw is Map<String, dynamic>) {
+        data = raw;
+      } else if (raw is String && raw.trim().isNotEmpty) {
+        data = jsonDecode(raw);
+      }
+      final rawTrial = data['trial_status'];
+      if (rawTrial is Map<String, dynamic>) {
+        return TrialStatus.fromJson(rawTrial);
+      }
+    } catch (_) {}
+    return null;
   }
 }
